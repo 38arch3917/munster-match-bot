@@ -6,12 +6,18 @@ import os
 import json
 import re
 
-# ---------- CONFIGURATION ----------
-TEAM_NAME = "Munster"
-SUBREDDIT = "Munsterrugby"
-MATCH_HISTORY_FILE = "posted.json"
-TEAM_URL = "https://rugbykickoff.com/teams/munster/"
-# ----------------------------------
+# ---------------- CONFIGURATION ----------------
+TEAM_NAME = "Munster"  # Team to track
+SUBREDDIT = "Munsterrugby"  # Where to post
+MATCH_HISTORY_FILE = "posted.json"  # Log of posted matches
+TEAM_URL = "https://rugbykickoff.com/teams/munster/"  # Source URL
+# ------------------------------------------------
+
+# ---------------- POST TIME LOGIC ----------------
+def get_post_time(match):
+    """Return the UTC datetime when the match thread should be posted (4 hours before kickoff)."""
+    return match["datetime"] - timedelta(hours=4)
+# -------------------------------------------------
 
 def get_munster_matches():
     """Scrape rugbykickoff.com for Munster fixtures."""
@@ -44,9 +50,11 @@ def get_munster_matches():
         except ValueError:
             continue
 
+        # Skip past matches
         if dt < datetime.utcnow() - timedelta(days=1):
             continue
 
+        # Extract teams
         teams_match = re.search(r"([A-Za-z\s]+)\s+vs\s+([A-Za-z\s]+)", text)
         teams = teams_match.group(0) if teams_match else TEAM_NAME
 
@@ -78,7 +86,7 @@ def reddit_client():
     )
 
 def already_posted(match):
-    """Check if match was already posted."""
+    """Check if a match has already been posted."""
     if not os.path.exists(MATCH_HISTORY_FILE):
         return False
     try:
@@ -89,7 +97,7 @@ def already_posted(match):
         return False
 
 def save_posted(match):
-    """Save match info to posted.json."""
+    """Save match info to JSON log."""
     data = []
     if os.path.exists(MATCH_HISTORY_FILE):
         with open(MATCH_HISTORY_FILE) as f:
@@ -115,6 +123,7 @@ def post_match_thread(match):
     subreddit.submit(title, selftext=body)
     print(f"✅ Posted: {title}")
 
+# ---------------- MAIN LOGIC ----------------
 if __name__ == "__main__":
     matches = get_munster_matches()
     if not matches:
@@ -122,8 +131,13 @@ if __name__ == "__main__":
         exit()
 
     today_match = get_today_match(matches)
-    if today_match and not already_posted(today_match):
-        post_match_thread(today_match)
-        save_posted(today_match)
+    if today_match:
+        post_time = get_post_time(today_match)
+        now = datetime.utcnow()
+        if now >= post_time and not already_posted(today_match):
+            post_match_thread(today_match)
+            save_posted(today_match)
+        else:
+            print(f"Match thread not posted yet. Scheduled post time: {post_time} UTC")
     else:
         print("No Munster match today or already posted.")
