@@ -1,15 +1,15 @@
-name: Run Munster Match Bot Daily
+name: Run Munster Match Bot
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # Every day at 08:00 UTC
+    - cron: '0 * * * *'   # Runs every hour at minute 0 UTC
   workflow_dispatch:       # Manual trigger option
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
