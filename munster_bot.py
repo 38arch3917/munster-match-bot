@@ -18,11 +18,9 @@ FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"  # 'Match Thread 🔴' flair
 # ------------------------------------------------
 
 def get_post_time(match):
-    """Return the UTC datetime when the match thread should be posted (4 hours before kickoff)."""
     return match["datetime"] - timedelta(hours=4)
 
 def get_munster_matches():
-    """Scrape rugbykickoff.com for Munster fixtures."""
     print("Fetching Munster fixtures...")
     try:
         r = requests.get(TEAM_URL, timeout=20)
@@ -132,7 +130,6 @@ def save_posted(match):
         json.dump(data, f)
 
 def format_starting_xv(home_name, away_name, home_players, away_players):
-    """Format the Starting XV in preformatted block style for Reddit."""
     lines = []
     lines.append(f"{home_name:<15} {'#':^5} {away_name:>15}")
     for i in range(15):
@@ -142,7 +139,6 @@ def format_starting_xv(home_name, away_name, home_players, away_players):
     return "```\n" + "\n".join(lines) + "\n```"
 
 def post_match_thread(match):
-    """Post a match thread to Reddit with flair."""
     try:
         reddit = reddit_client()
         subreddit = reddit.subreddit(SUBREDDIT)
@@ -153,7 +149,7 @@ def post_match_thread(match):
         home_name = parts[0].strip() if len(parts) >= 2 else "Munster"
         away_name = parts[1].strip() if len(parts) >= 2 else "Opponent"
 
-        # Placeholder player names until lineup scraping is added
+        # Placeholder player names
         home_players = [f"Player {i}" for i in range(1, 16)]
         away_players = [f"Player {chr(64+i)}" for i in range(1, 16)]
 
@@ -167,12 +163,13 @@ def post_match_thread(match):
         )
 
         body = (
-            f"**Competition:** {match['competition']}\n"
-            f"**Kickoff:** {kickoff_local.strftime('%a %d %b %Y, %H:%M (IST)')} – {match['venue']}\n"
-            f"**Broadcasters:** {match['broadcasters']}\n\n"
-            f"**Teams:** {match['teams'].replace('vs', 'vs.').strip()}\n\n"
-            f"**Starting XV:**\n{starting_xv_md}\n\n"
-            f"**Stand Up And Fight! 💪🔴**"
+            f"🏆 **Competition:** {match['competition']}\n"
+            f"🕖 **Kickoff:** {kickoff_local.strftime('%a %d %b %Y, %H:%M (IST)')} – {match['venue']}\n"
+            f"📺 **Broadcasters:** {match['broadcasters']}\n\n"
+            f"👊 **Teams:** {match['teams'].replace('vs', 'vs.').strip()}\n\n"
+            f"🏉 **Starting XV:**\n{starting_xv_md}\n\n"
+            f"**Stand Up And Fight! 💪🔴**\n\n"
+            f"*Posted automatically by MunsterKickoff 🤖 — made by /u/i93*"
         )
 
         submission = subreddit.submit(title, selftext=body)
