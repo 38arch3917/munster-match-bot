@@ -18,6 +18,7 @@ COMPETITION_ABBREV = {
     "United Rugby Championship": "URC",
     "European Rugby Champions Cup": "ERCC"
 }
+FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"  # 'Match Thread 🔴' flair
 # ------------------------------------------------
 
 def get_post_time(match):
@@ -61,7 +62,7 @@ def get_munster_matches():
 
         venue_match = re.search(r"at\s+([A-Za-z\s\-,]+)", text)
         if not venue_match:
-            venue_match = re.search(r"([A-Za-z\s\-,]+)", text)
+            venue_match = re.search(r"\(([A-Za-z\s\-,]+)\)", text)
         venue = venue_match.group(1).strip() if venue_match else None
 
         if not venue:
@@ -206,8 +207,13 @@ def post_match_thread(match):
             f"Up {TEAM_NAME}! 🔴"
         )
 
-        subreddit.submit(title, selftext=body)
-        print(f"✅ Posted: {title}")
+        # Submit the post
+        submission = subreddit.submit(title, selftext=body)
+
+        # Assign the flair using the provided flair ID
+        submission.flair.select(FLAIR_ID)
+
+        print(f"✅ Posted with flair 'Match Thread 🔴': {title}")
 
     except Exception as e:
         print(f"❌ Error posting to Reddit: {e}")
@@ -223,4 +229,20 @@ if __name__ == "__main__":
     print("\nUpcoming Munster matches today:")
     for m in matches:
         kickoff_local = m["datetime"].astimezone(IRELAND_TZ)
-        print(f"- {
+        print(f"- {m['teams']} | Competition: {m['competition']} | Kickoff: {kickoff_local.strftime('%a %d %b %Y %H:%M (IST)')} | Venue: {m['venue']}")
+
+    today_match = get_today_match(matches)
+    if today_match:
+        post_time = get_post_time(today_match)
+        now = datetime.now(ZoneInfo("UTC"))
+        post_time_local = post_time.astimezone(IRELAND_TZ)
+        print(f"\nToday's match scheduled for posting:")
+        print(f"- {today_match['teams']} | Competition: {today_match['competition']} | Scheduled post time: {post_time_local.strftime('%a %d %b %Y %H:%M (IST)')} | Venue: {today_match['venue']}")
+
+        if now >= post_time and not already_posted(today_match):
+            post_match_thread(today_match)
+            save_posted(today_match)
+        else:
+            print("Match thread not posted yet (waiting for post time or already posted).")
+    else:
+        print("\nNo Munster match today or already posted.")
