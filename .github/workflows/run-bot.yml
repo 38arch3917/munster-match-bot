@@ -2,13 +2,12 @@ name: Run Munster Match Bot
 
 on:
   schedule:
-    - cron: '0 * * * *'   # Runs every hour at minute 0 UTC
-  workflow_dispatch:       # Manual trigger option
+    - cron: '0 * * * *'   # Runs every hour on the hour UTC
+  workflow_dispatch:       # Allow manual trigger
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,9 +18,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install praw requests beautifulsoup4
+        run: pip install praw requests beautifulsoup4 pytz
 
       - name: Run Munster bot
         env:
@@ -30,4 +27,4 @@ jobs:
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
-        run: python munster_bot.py
+        run: python scripts/munster_bot.py
