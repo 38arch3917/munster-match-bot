@@ -1,4 +1,4 @@
-# .github/scripts/update_scores.py
+# scripts/update_scores.py
 # Called by update-scores.yml
 
 import json
