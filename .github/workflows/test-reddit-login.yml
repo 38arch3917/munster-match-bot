@@ -1,0 +1,46 @@
+name: Test Reddit Login
+
+on:
+  workflow_dispatch:  # Allows manual run
+
+jobs:
+  test-login:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install praw
+
+      - name: Test Reddit credentials
+        env:
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+          USER_AGENT: ${{ secrets.USER_AGENT }}
+        run: |
+          python - <<'EOF'
+          import praw
+          import sys
+
+          try:
+              reddit = praw.Reddit(
+                  client_id="${{ secrets.REDDIT_CLIENT_ID }}",
+                  client_secret="${{ secrets.REDDIT_CLIENT_SECRET }}",
+                  username="${{ secrets.REDDIT_USERNAME }}",
+                  password="${{ secrets.REDDIT_PASSWORD }}",
+                  user_agent="${{ secrets.USER_AGENT }}"
+              )
+              me = reddit.user.me()
+              print(f"✅ Successfully logged in as: {me}")
+          except Exception as e:
+              print("❌ Login failed:", e)
+              sys.exit(1)
+          EOF
