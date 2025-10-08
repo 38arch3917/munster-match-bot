@@ -26,4 +26,4 @@ jobs:
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
-        run: python create_player_flairs.py
+        run: python scripts/create_player_flairs.py
