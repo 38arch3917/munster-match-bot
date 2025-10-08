@@ -1,0 +1,46 @@
+name: Test Reddit Post
+
+on:
+  workflow_dispatch:
+
+jobs:
+  post-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install praw
+
+      - name: Test Reddit Post
+        env:
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+          USER_AGENT: ${{ secrets.USER_AGENT }}
+        run: |
+          python - <<'EOF'
+          import praw, os
+
+          reddit = praw.Reddit(
+              client_id=os.getenv("REDDIT_CLIENT_ID"),
+              client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+              username=os.getenv("REDDIT_USERNAME"),
+              password=os.getenv("REDDIT_PASSWORD"),
+              user_agent=os.getenv("USER_AGENT")
+          )
+
+          subreddit = reddit.subreddit("Munsterrugby")
+          title = "🤖 Test Post — MunsterKickoff Bot Connection Check"
+          body = "This is a one-time test post from the MunsterKickoff bot to confirm posting permissions.\n\nIf you're seeing this, everything works perfectly. 🔴"
+
+          submission = subreddit.submit(title, selftext=body)
+          print(f"✅ Test post created successfully: {submission.url}")
+          EOF
