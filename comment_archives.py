@@ -69,7 +69,7 @@ def main():
 
         comment_body = (
             f"🗞️ **Archived Copy:** [{archive}]({archive})\n\n"
-            f"*Auto-commented & stickied by [MunsterKickoff Bot 🔴](https://www.reddit.com/user/MunsterKickoff)*"
+            f"*Automated by /u/MunsterKickoff 🤖*"
         )
 
         try:
