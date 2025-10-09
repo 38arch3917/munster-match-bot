@@ -23,13 +23,30 @@ reddit = praw.Reddit(
 
 
 def get_archive_url(url):
-    """Generate an archive.ph link."""
+    """Generate a short archive.ph link (e.g. https://archive.ph/4FngS)."""
     try:
-        resp = requests.post("https://archive.ph/submit/", data={"url": url}, timeout=20)
-        if resp.ok:
-            return resp.url
+        session = requests.Session()
+        resp = session.post("https://archive.ph/submit/", data={"url": url}, timeout=45, allow_redirects=False)
+
+        # Check for 'Refresh' header first
+        refresh = resp.headers.get("Refresh")
+        if refresh:
+            short_link = refresh.split("url=")[-1]
+            if short_link.startswith("http"):
+                return short_link.strip()
+
+        # Check for 'Location' header (sometimes used)
+        if "Location" in resp.headers:
+            return resp.headers["Location"].strip()
+
+        # If still nothing, try a follow-up GET to the submit URL
+        follow = session.get("https://archive.ph/submit/", params={"url": url}, timeout=45)
+        if follow.url and "archive.ph" in follow.url and not follow.url.endswith("/submit/"):
+            return follow.url
     except Exception as e:
         print(f"Error archiving {url}: {e}")
+
+    # Fallback
     return f"https://archive.ph/?run=1&url={url}"
 
 
@@ -37,11 +54,11 @@ def load_posted():
     """Load IDs of posts already processed."""
     if not os.path.exists(POSTED_FILE):
         return []
-    with open(POSTED_FILE, "r") as f:
-        try:
+    try:
+        with open(POSTED_FILE, "r") as f:
             return json.load(f)
-        except json.JSONDecodeError:
-            return []
+    except json.JSONDecodeError:
+        return []
 
 
 def save_posted(posted):
@@ -57,7 +74,7 @@ def main():
 
     print(f"Checking subreddit '{SUBREDDIT_NAME}' at {datetime.utcnow()} UTC...")
 
-    for submission in subreddit.new(limit=10):  # Check the 10 newest posts
+    for submission in subreddit.new(limit=10):  # Check newest 10 posts
         if submission.id in posted:
             continue
 
@@ -65,7 +82,7 @@ def main():
         if author.lower() != TARGET_USER.lower():
             continue
 
-        # Comment only if not already commented by the bot
+        # Skip if bot already commented
         already_commented = any(
             comment.author and comment.author.name.lower() == BOT_USERNAME.lower()
             for comment in submission.comments
@@ -75,11 +92,12 @@ def main():
             new_posted.append(submission.id)
             continue
 
+        # Archive and comment
         archive_url = get_archive_url(submission.url)
         comment_text = (
             f"🔗 **Archived version:** {archive_url}\n\n"
             f"---\n\n"
-            f"_Automated by /u/MunsterKickoff 🤖🏉"
+            f"*Automated by /u/MunsterKickoff 🤖🏉*"
         )
 
         try:
@@ -90,10 +108,10 @@ def main():
         except Exception as e:
             print(f"❌ Error commenting on {submission.title}: {e}")
 
-        time.sleep(5)
+        time.sleep(5)  # polite delay
 
     save_posted(new_posted)
-    print("Done.")
+    print("✅ Done.")
 
 
 if __name__ == "__main__":
