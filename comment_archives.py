@@ -9,6 +9,7 @@ SUBREDDIT = "Munsterrugby"
 TARGET_USER = "MannyR1022"
 POSTED_FILE = "archive_commented.json"
 CHECK_LIMIT = 10  # check last 10 posts
+BOT_USERNAME = "MunsterKickoff"
 # ----------------------------------------
 
 def reddit_client():
@@ -45,6 +46,15 @@ def get_archive_link(url):
         print(f"Error archiving {url}: {e}")
         return None
 
+def has_existing_comment(submission):
+    """Check if MunsterKickoff has already commented on this post."""
+    submission.comments.replace_more(limit=0)
+    for comment in submission.comments.list():
+        if comment.author and comment.author.name.lower() == BOT_USERNAME.lower():
+            print(f"Already commented on: {submission.title}")
+            return True
+    return False
+
 def main():
     reddit = reddit_client()
     subreddit = reddit.subreddit(SUBREDDIT)
@@ -60,6 +70,9 @@ def main():
             continue
         if submission.id in posted:
             continue
+        if has_existing_comment(submission):
+            new_posted.append(submission.id)
+            continue
 
         print(f"Found new Independent.ie post: {submission.title}")
         archive = get_archive_link(submission.url)
@@ -69,7 +82,7 @@ def main():
 
         comment_body = (
             f"🗞️ **Archived Copy:** [{archive}]({archive})\n\n"
-            f"*Automated by /u/MunsterKickoff 🤖🏉*"
+            f"*Automated by /u/MunsterKickoff 🤖*"
         )
 
         try:
