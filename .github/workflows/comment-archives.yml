@@ -2,19 +2,16 @@ name: Comment Archive Links
 
 on:
   schedule:
-    - cron: '*/1 * * * *'  # every 1 minute
-  workflow_dispatch:
+    - cron: '*/3 * * * *'  # Runs every 3 minutes
+  workflow_dispatch:        # Allow manual run
 
 jobs:
-  run-archive-commenter:
+  comment-archives:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # allow committing updates
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,11 +29,3 @@ jobs:
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
         run: python comment_archives.py
-
-      - name: Commit and push updated JSON
-        run: |
-          git config user.name "MunsterKickoff Bot"
-          git config user.email "actions@github.com"
-          git add archive_commented.json
-          git commit -m "Update archive_commented.json" || echo "No changes to commit"
-          git push
