@@ -79,7 +79,7 @@ def main():
         comment_text = (
             f"🔗 **Archived version:** {archive_url}\n\n"
             f"---\n\n"
-            f"_Automated by /u/MunsterKickoff 🤖_"
+            f"_Automated by /u/MunsterKickoff 🤖🏉"
         )
 
         try:
