@@ -1,100 +1,109 @@
 import praw
-import os
-import json
 import time
+import json
 import requests
+from datetime import datetime
 
-# ---------------- CONFIG ----------------
-SUBREDDIT = "Munsterrugby"
-TARGET_USER = "MannyR1022"
-POSTED_FILE = "archive_commented.json"
-CHECK_LIMIT = 10  # check last 10 posts
+# Constants
+SUBREDDIT_NAME = "MunsterRugby"
 BOT_USERNAME = "MunsterKickoff"
-# ----------------------------------------
+TARGET_USER = "MannyR1022"
+POSTED_FILE = "posted_archives.json"
 
-def reddit_client():
-    return praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        username=os.getenv("REDDIT_USERNAME"),
-        password=os.getenv("REDDIT_PASSWORD"),
-        user_agent=os.getenv("USER_AGENT")
-    )
+# Load Reddit credentials from secrets/environment variables
+import os
+
+reddit = praw.Reddit(
+    client_id=os.getenv("REDDIT_CLIENT_ID"),
+    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+    username=os.getenv("REDDIT_USERNAME"),
+    password=os.getenv("REDDIT_PASSWORD"),
+    user_agent=os.getenv("USER_AGENT", "MunsterKickoff Bot v1.0")
+)
+
+
+def get_archive_url(url):
+    """Generate archive.ph link."""
+    try:
+        archive_req = requests.post("https://archive.ph/submit/", data={"url": url}, timeout=20)
+        if archive_req.ok:
+            return archive_req.url
+    except Exception as e:
+        print(f"Error archiving {url}: {e}")
+    return f"https://archive.ph/?run=1&url={url}"
+
+
+def has_existing_comment(submission, reddit):
+    """Check if MunsterKickoff already commented and re-sticky if needed."""
+    submission.comments.replace_more(limit=0)
+    for comment in submission.comments.list():
+        if comment.author and comment.author.name.lower() == BOT_USERNAME.lower():
+            try:
+                if not comment.stickied:
+                    comment.mod.distinguish(sticky=True)
+                    print(f"Re-stickied existing comment on: {submission.title}")
+            except Exception as e:
+                print(f"Error restickying comment: {e}")
+            return True
+    return False
+
 
 def load_posted():
+    """Load list of already processed submission IDs."""
     if not os.path.exists(POSTED_FILE):
         return []
-    with open(POSTED_FILE) as f:
+    with open(POSTED_FILE, "r") as f:
         try:
             return json.load(f)
         except json.JSONDecodeError:
             return []
 
-def save_posted(data):
+
+def save_posted(posted):
+    """Save updated list of processed submission IDs."""
     with open(POSTED_FILE, "w") as f:
-        json.dump(data, f)
+        json.dump(posted, f)
 
-def get_archive_link(url):
-    try:
-        res = requests.get(f"https://archive.ph/submit/?url={url}", timeout=30)
-        if res.url.startswith("https://archive.ph/"):
-            return res.url
-        else:
-            # sometimes returns HTML page; fallback to just show archive.ph/URL
-            return f"https://archive.ph/{url}"
-    except Exception as e:
-        print(f"Error archiving {url}: {e}")
-        return None
-
-def has_existing_comment(submission):
-    """Check if MunsterKickoff has already commented on this post."""
-    submission.comments.replace_more(limit=0)
-    for comment in submission.comments.list():
-        if comment.author and comment.author.name.lower() == BOT_USERNAME.lower():
-            print(f"Already commented on: {submission.title}")
-            return True
-    return False
 
 def main():
-    reddit = reddit_client()
-    subreddit = reddit.subreddit(SUBREDDIT)
+    subreddit = reddit.subreddit(SUBREDDIT_NAME)
     posted = load_posted()
-    new_posted = posted.copy()
+    new_posted = []
 
-    for submission in subreddit.new(limit=CHECK_LIMIT):
-        if submission.author is None:
-            continue
-        if submission.author.name.lower() != TARGET_USER.lower():
-            continue
-        if "independent.ie" not in submission.url.lower():
-            continue
+    print(f"Checking subreddit: {SUBREDDIT_NAME} at {datetime.utcnow()} UTC")
+
+    for submission in subreddit.new(limit=10):  # last few new posts
         if submission.id in posted:
-            continue
-        if has_existing_comment(submission):
             new_posted.append(submission.id)
             continue
 
-        print(f"Found new Independent.ie post: {submission.title}")
-        archive = get_archive_link(submission.url)
-        if not archive:
-            print("Could not create archive link.")
+        author = submission.author.name if submission.author else "[deleted]"
+        if author.lower() != TARGET_USER.lower():
             continue
 
+        if has_existing_comment(submission, reddit):
+            new_posted.append(submission.id)
+            continue
+
+        archive_url = get_archive_url(submission.url)
         comment_body = (
-            f"🗞️ **Archived Copy:** [{archive}]({archive})\n\n"
-            f"*Automated by /u/MunsterKickoff 🤖*"
+            f"🔗 **Archived version:** {archive_url}\n\n"
+            f"---\n\n"
+            f"_Automated by /u/MunsterKickoff 🤖_"
         )
 
         try:
             comment = submission.reply(comment_body)
             comment.mod.distinguish(sticky=True)
-            print(f"✅ Commented and stickied on post: {submission.title}")
+            print(f"✅ Commented and stickied on: {submission.title}")
             new_posted.append(submission.id)
-            time.sleep(5)
         except Exception as e:
-            print(f"❌ Failed to comment on {submission.title}: {e}")
+            print(f"Error commenting on {submission.title}: {e}")
+
+        time.sleep(5)
 
     save_posted(new_posted)
+
 
 if __name__ == "__main__":
     main()
