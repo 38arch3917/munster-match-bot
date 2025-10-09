@@ -8,9 +8,13 @@ on:
 jobs:
   run-archive-commenter:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # allow committing updates
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,3 +32,11 @@ jobs:
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
         run: python comment_archives.py
+
+      - name: Commit and push updated JSON
+        run: |
+          git config user.name "MunsterKickoff Bot"
+          git config user.email "actions@github.com"
+          git add archive_commented.json
+          git commit -m "Update archive_commented.json" || echo "No changes to commit"
+          git push
