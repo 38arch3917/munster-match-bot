@@ -93,17 +93,23 @@ def extract_lineup_from_teams_text(text, team_name):
 def already_posted_url(url):
     if not os.path.exists(MATCH_HISTORY_FILE): return False
     try:
-        with open(MATCH_HISTORY_FILE) as f: data=json.load(f)
+        with open(MATCH_HISTORY_FILE) as f:
+            data=json.load(f)
         return url in data
-    except Exception: return False
+    except Exception:
+        return False
 
 def save_posted_url(url):
     data=[]
     if os.path.exists(MATCH_HISTORY_FILE):
-        try: with open(MATCH_HISTORY_FILE) as f: data=json.load(f)
-        except Exception: data=[]
+        try:
+            with open(MATCH_HISTORY_FILE) as f:
+                data=json.load(f)
+        except Exception:
+            data=[]
     data.append(url)
-    with open(MATCH_HISTORY_FILE,"w") as f: json.dump(data,f)
+    with open(MATCH_HISTORY_FILE,"w") as f:
+        json.dump(data,f)
 
 # ---------------- SCRAPING ----------------
 def find_next_munster_match():
@@ -212,7 +218,8 @@ def post_match_thread(match):
         "",
         f"🏆 **Competition:** {match['competition']}"
     ]
-    if match["broadcasters"]: body_lines+=["","📺 **Broadcasters:** "+", ".join(match["broadcasters"])]
+    if match["broadcasters"]: 
+        body_lines+=["","📺 **Broadcasters:** "+", ".join(match["broadcasters"])]
     body_lines+=["","🏉 **Starting XV:**","",f"| # | {match['home']} | {match['away']} |","|:--:|:--:|:--:|"]
     for i in range(15):
         h = match["lineups"][match["home"]][i] if i<len(match["lineups"][match["home"]]) else ""
@@ -225,8 +232,10 @@ def post_match_thread(match):
 
     try:
         submission = subreddit.submit(title, selftext=body, flair_id=FLAIR_ID)
-        try: submission.mod.distinguish(sticky=True)
-        except Exception: pass
+        try:
+            submission.mod.distinguish(sticky=True)
+        except Exception:
+            pass
         print(f"✅ Posted: {title}")
         save_posted_url(match["url"])
     except Exception as e:
@@ -236,19 +245,23 @@ def post_match_thread(match):
 def main(force_post=False):
     match_link = find_next_munster_match()
     if not match_link: 
-        print("No upcoming unposted Munster match found. Exiting."); return
+        print("No upcoming unposted Munster match found. Exiting.")
+        return
 
     match = scrape_match_and_teams(match_link)
     if not match: 
-        print("Failed to scrape match. Exiting."); return
+        print("Failed to scrape match. Exiting.")
+        return
 
     if already_posted_url(match["url"]):
-        print("Already posted this match. Exiting."); return
+        print("Already posted this match. Exiting.")
+        return
 
     now_utc = datetime.now(pytz.utc)
     post_time = match["datetime"] - timedelta(hours=POST_BEFORE_HOURS) if match["datetime"] else now_utc
     will_post = force_post or match.get("is_live",False) or (match["datetime"] and now_utc>=post_time)
-    if not will_post and match["datetime"] and abs((now_utc-match["datetime"]).total_seconds())<7200: will_post=True
+    if not will_post and match["datetime"] and abs((now_utc-match["datetime"]).total_seconds())<7200: 
+        will_post=True
 
     if will_post:
         print("Posting match thread now...")
