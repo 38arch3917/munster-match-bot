@@ -1,4 +1,3 @@
-# munster_bot.py
 import os
 import json
 import requests
@@ -16,10 +15,11 @@ POST_BEFORE_HOURS = 4
 FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 IST = pytz.timezone("Europe/Dublin")
-RUGBYKICKOFF_FIXTURES = "https://www.rugbykickoff.com/Munster"
+RUGBY_KICKOFF_FIXTURES = "https://www.rugbykickoff.com/munster"
 BROADCASTERS_WHITELIST = ["Premier Sports", "TG4", "RTÉ 2", "Access Munster", "URC.tv"]
 # ---------------------------------------
 
+# ---------------- HELPERS ----------------
 def safe_get(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=20)
@@ -51,69 +51,63 @@ def save_posted(url):
     with open(MATCH_HISTORY_FILE, "w") as f:
         json.dump(data, f)
 
-def parse_datetime(date_str, time_str):
+def parse_datetime_kickoff(dt_str):
+    """
+    Parses strings like 'Sat 18 Oct 2025 17:15 IST' into a timezone-aware datetime.
+    """
     try:
-        # Example format: "Sat 25 Oct 2025" + "20:45 IST"
-        dt = datetime.strptime(f"{date_str} {time_str}", "%a %d %b %Y %H:%M %Z")
-        dt = IST.localize(dt)
-        return dt
-    except Exception:
+        dt_naive = datetime.strptime(dt_str.strip(), "%a %d %b %Y %H:%M %Z")
+        dt_aware = IST.localize(dt_naive)
+        return dt_aware
+    except:
         return None
 
+# ---------------- SCRAPING ----------------
 def find_next_match():
-    html = safe_get(RUGBYKICKOFF_FIXTURES)
+    html = safe_get(RUGBY_KICKOFF_FIXTURES)
     if not html:
         return None
-
     soup = BeautifulSoup(html, "html.parser")
-    # Look for fixture cards
-    fixtures = soup.select("a[href*='/game/']")
+    
+    # Look for fixture rows
+    fixtures = soup.select("div.fixture-row")  # assume div.fixture-row contains each match
     for f in fixtures:
-        href = f.get("href")
-        if not href:
-            continue
-        full_url = href if href.startswith("http") else "https://www.rugbykickoff.com" + href
-
-        if already_posted(full_url):
-            continue
-
-        # Extract opponent
-        text = f.get_text(" ", strip=True)
-        opponent_match = re.search(r"Munster\s+vs\.?\s+(.*)", text, re.I)
-        opponent = opponent_match.group(1) if opponent_match else "Opponent"
-
-        # Extract competition
-        competition = "URC"
-        comp_match = re.search(r"(United Rugby Championship|Champions Cup|Challenge Cup|Friendly|International)", text, re.I)
-        if comp_match:
-            competition = comp_match.group(1)
-
-        # Extract date and time
-        date_match = re.search(r"([A-Za-z]{3} \d{1,2} [A-Za-z]{3,9} \d{4})", text)
-        time_match = re.search(r"(\d{1,2}:\d{2})", text)
-        date_str = date_match.group(1) if date_match else None
-        time_str = time_match.group(1) if time_match else None
-        kickoff_dt = parse_datetime(date_str, time_str) if date_str and time_str else None
-
-        # Extract venue
-        venue = "TBC"
-        venue_match = re.search(r"at\s+([A-Za-z0-9\s\.\-]+)", text)
-        if venue_match:
-            venue = venue_match.group(1)
-
-        # Only return match if essential data exists
-        if opponent and kickoff_dt and venue:
+        try:
+            home = f.select_one(".team-home").get_text(strip=True)
+            away = f.select_one(".team-away").get_text(strip=True)
+            date_str = f.select_one(".kickoff").get_text(strip=True)  # e.g., "Sat 18 Oct 2025 17:15 IST"
+            kickoff = parse_datetime_kickoff(date_str)
+            venue = f.select_one(".venue").get_text(strip=True) if f.select_one(".venue") else "TBC"
+            competition = f.select_one(".competition").get_text(strip=True) if f.select_one(".competition") else "URC"
+            url_tag = f.select_one("a")
+            match_url = url_tag["href"] if url_tag and url_tag.get("href") else RUGBY_KICKOFF_FIXTURES
+            
+            if already_posted(match_url):
+                continue
+            
+            broadcasters = []
+            b_tags = f.select(".broadcaster")
+            for b in b_tags:
+                name = b.get_text(strip=True)
+                if name in BROADCASTERS_WHITELIST:
+                    broadcasters.append(name)
+            if not broadcasters:
+                broadcasters = BROADCASTERS_WHITELIST
+            
             return {
-                "url": full_url,
-                "home": "Munster",
-                "away": opponent,
-                "datetime": kickoff_dt,
+                "url": match_url,
+                "home": home,
+                "away": away,
+                "datetime": kickoff,
                 "venue": venue,
                 "competition": competition,
-                "broadcasters": BROADCASTERS_WHITELIST,
+                "broadcasters": broadcasters
             }
+        except Exception as e:
+            continue
     return None
 
+# ---------------- REDDIT ----------------
 def reddit_client():
     return praw.Reddit(
         client_id=os.getenv("REDDIT_CLIENT_ID"),
@@ -127,9 +121,9 @@ def post_match_thread(match):
     reddit = reddit_client()
     subreddit = reddit.subreddit(SUBREDDIT)
 
-    dt_ist = match["datetime"].astimezone(IST)
-    date_str = dt_ist.strftime("%a %d %b %Y")
-    time_str = dt_ist.strftime("%H:%M")
+    dt_ist = match["datetime"].astimezone(IST) if match["datetime"] else None
+    date_str = dt_ist.strftime("%a %d %b %Y") if dt_ist else "TBC"
+    time_str = dt_ist.strftime("%H:%M") if dt_ist else "TBC"
 
     title = f"Match Thread: {match['home']} vs {match['away']} ({match['competition']}) - {date_str} {time_str} - {match['venue']}"
 
@@ -156,17 +150,17 @@ def post_match_thread(match):
     except Exception as e:
         print(f"❌ Reddit post failed: {e}")
 
+# ---------------- MAIN ----------------
 def main(force_post=False):
     match = find_next_match()
     if not match:
-        print("No upcoming unposted Munster match found with complete data.")
+        print("No upcoming unposted Munster match found.")
         return
     if already_posted(match["url"]):
         print("Already posted this match.")
         return
-
     now_utc = datetime.now(pytz.utc)
-    post_time = match["datetime"] - timedelta(hours=POST_BEFORE_HOURS)
+    post_time = match["datetime"] - timedelta(hours=POST_BEFORE_HOURS) if match["datetime"] else now_utc
     if force_post or now_utc >= post_time:
         post_match_thread(match)
     else:
