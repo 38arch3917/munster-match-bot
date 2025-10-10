@@ -113,19 +113,32 @@ def save_posted_url(url):
 
 # ---------------- SCRAPING ----------------
 def find_next_munster_match():
+    # First try RugbyPass
     r = safe_get(FIXTURES_URL_RP)
-    if not r: return None
-    soup = BeautifulSoup(r.text,"html.parser")
-    anchors = soup.select("a[href*='/live/'], a[href*='/live']")
-    seen = set()
-    for a in anchors:
-        href = a.get("href")
-        if not href: continue
-        full = href if href.startswith("http") else "https://www.rugbypass.com"+href
-        if full in seen or already_posted_url(full): continue
-        seen.add(full)
-        text = a.get_text(" ",strip=True)
-        if TEAM_NAME.lower() in text.lower() or "munster" in full.lower(): return full
+    if r:
+        soup = BeautifulSoup(r.text,"html.parser")
+        anchors = soup.select("a[href*='/live/'], a[href*='/live']")
+        seen = set()
+        for a in anchors:
+            href = a.get("href")
+            if not href: continue
+            full = href if href.startswith("http") else "https://www.rugbypass.com"+href
+            if full in seen or already_posted_url(full): continue
+            seen.add(full)
+            text = a.get_text(" ",strip=True)
+            if TEAM_NAME.lower() in text.lower() or "munster" in full.lower(): return full
+    # Backup: UnitedRugby.com
+    r2 = safe_get(FIXTURES_URL_URC)
+    if r2:
+        soup2 = BeautifulSoup(r2.text,"html.parser")
+        anchors = soup2.select("a[href*='/fixtures/']")
+        for a in anchors:
+            href = a.get("href")
+            if not href: continue
+            full = href if href.startswith("http") else "https://www.unitedrugby.com"+href
+            text = a.get_text(" ",strip=True)
+            if TEAM_NAME.lower() in text.lower() and not already_posted_url(full):
+                return full
     return None
 
 def scrape_match_and_teams(match_url):
@@ -232,10 +245,8 @@ def post_match_thread(match):
 
     try:
         submission = subreddit.submit(title, selftext=body, flair_id=FLAIR_ID)
-        try:
-            submission.mod.distinguish(sticky=True)
-        except Exception:
-            pass
+        try: submission.mod.distinguish(sticky=True)
+        except Exception: pass
         print(f"✅ Posted: {title}")
         save_posted_url(match["url"])
     except Exception as e:
