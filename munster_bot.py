@@ -13,7 +13,7 @@ SUBREDDIT = "Munsterrugby"
 MATCH_HISTORY_FILE = "posted.json"
 TEAM_URL_ESPN = "https://www.espn.com/rugby/team/fixtures/_/id/228"
 FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"  # 'Match Thread 🔴'
-FORCE_POST = False  # <-- Set True for testing to post immediately
+FORCE_POST = True  # <-- Set True for testing to post immediately
 # ------------------------------------------------
 
 # ---------------- TIMEZONE ----------------
