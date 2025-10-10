@@ -13,7 +13,7 @@ SUBREDDIT = "Munsterrugby"
 MATCH_HISTORY_FILE = "posted.json"
 TEAM_URL_RK_JSON = "https://www.rugbykickoff.com/api/teams/munster/fixtures"
 FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"  # 'Match Thread 🔴'
-TEST_MODE = False  # Set True to force posting for testing
+TEST_MODE = True  # Set True to force posting for testing
 # ------------------------------------------------
 
 # ---------------- TIMEZONE ----------------
