@@ -14,36 +14,30 @@ next_match = {
     "competition": "URC",
     "datetime_local": IRISH_TZ.localize(datetime(2025,10,10,19,0)),
     "venue": "Murrayfield Stadium",
-    "url": "https://www.rugbykickoff.com/game/edinburgh_munster_2025-10-10/"
-}
+import praw
+import requests
+from datetime import datetime, timedelta
+import pytz
+import os
+import json
 
-def reddit_client():
-    return praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        username=os.getenv("REDDIT_USERNAME"),
-        password=os.getenv("REDDIT_PASSWORD"),
-        user_agent=os.getenv("USER_AGENT")
-    )
+# ---------------- CONFIG ----------------
+TEAM_NAME = "Munster"
+SUBREDDIT = "Munsterrugby"
+MATCH_HISTORY_FILE = "posted.json"
+FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"  # Match Thread 🔴
+RUGBYKICKOFF_API = "https://www.rugbykickoff.com/api/teams/munster/fixtures"
+TEST_MODE = False  # Set True to force post immediately
+IRISH_TZ = pytz.timezone("Europe/Dublin")
+# ----------------------------------------
 
-def post_match_thread(match):
-    reddit = reddit_client()
-    subreddit = reddit.subreddit(SUBREDDIT)
-    formatted_date = match["datetime_local"].strftime("%A %d %b %Y @ %H:%Mhrs (IST) - " + match["venue"])
-    title = f"🏉 {match['competition']} | {match['teams']} | {formatted_date}"
-    body = (
-        f"**Kickoff:** {formatted_date}\n\n"
-        f"**Competition:** {match['competition']}\n\n"
-        f"**Venue:** {match['venue']}\n\n"
-        f"**Starting XV ⚫🔴⚪**\n\n"
-        f"(To be confirmed)\n\n"
-        f"**Stand Up And Fight! 💪🔴**\n\n"
-        f"*Posted automatically by MunsterKickoff Bot 🤖*"
-    )
-    submission = subreddit.submit(title, selftext=body, flair_id=FLAIR_ID)
-    submission.mod.distinguish(sticky=True)
-    print(f"✅ Posted: {title}")
+def get_post_time(match):
+    """Return the UTC datetime to post the thread (4 hours before kickoff)."""
+    return match["datetime_utc"] - timedelta(hours=4)
 
-# ---------------- MAIN ----------------
-if __name__ == "__main__":
-    post_match_thread(next_match)
+def get_munster_matches():
+    """Fetch Munster fixtures from RugbyKickoff API."""
+    print("Fetching Munster fixtures from RugbyKickoff API...")
+    matches = []
+    try:
+        r = requests.get(RUGBYKICKOFF_API, timeoutatch_thread(next_match)
