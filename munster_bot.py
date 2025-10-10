@@ -1,7 +1,11 @@
-from datetime import datetime, timedelta
-import pytz
-import os
 import praw
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import os
+import json
+import pytz
+import re
 
 # ---------------- CONFIG ----------------
 SUBREDDIT = "Munsterrugby"
