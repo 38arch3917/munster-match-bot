@@ -1,19 +1,100 @@
 import praw
 import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+import pytz
 import os
 import json
-import pytz
 
-# ---------------- CONFIGURATION ----------------
 TEAM_NAME = "Munster"
 SUBREDDIT = "Munsterrugby"
 MATCH_HISTORY_FILE = "posted.json"
-FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"  # 'Match Thread 🔴'
-API_URL = "https://www.rugbykickoff.com/api/teams/munster/fixtures"
-# ------------------------------------------------
+BASE_URL = "https://www.rugbypass.com/live/"
+FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"
 
-IRISH_TZ = pytz.timezone("Europe/Dublin")
+IST = pytz.timezone("Europe/Dublin")
+
+def get_next_munster_match():
+    print("Fetching next Munster match from RugbyPass...")
+    try:
+        r = requests.get("https://www.rugbypass.com/fixtures/munster/", timeout=20)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"❌ Error fetching fixtures: {e}")
+        return None
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    link = soup.select_one('a[href*="/live/munster-vs"], a[href*="/live/vs-munster"]')
+    if not link:
+        print("❌ No upcoming Munster matches found.")
+        return None
+
+    match_url = "https://www.rugbypass.com" + link["href"]
+    return scrape_match_details(match_url)
+
+def scrape_match_details(url):
+    print(f"Scraping match details from {url}")
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+    except Exception as e:
+        print(f"❌ Error fetching match page: {e}")
+        return None
+
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Title
+    title_el = soup.select_one("h1")
+    title = title_el.get_text(strip=True) if title_el else "Munster Match"
+
+    # Date, time, and venue
+    meta = soup.select_one(".match-details")
+    meta_text = meta.get_text(" ", strip=True) if meta else ""
+    date_time = soup.select_one(".fixture__date")
+    kickoff_str = date_time.get_text(strip=True) if date_time else ""
+    venue = soup.select_one(".fixture__venue")
+    venue_text = venue.get_text(strip=True) if venue else "TBC"
+
+    # Parse kickoff time (if available)
+    dt = datetime.utcnow() + timedelta(days=1)
+    for fmt in ("%A %d %B %Y %H:%M", "%d %B %Y %H:%M"):
+        try:
+            dt = datetime.strptime(kickoff_str, fmt)
+            break
+        except Exception:
+            continue
+    dt_ist = IST.localize(dt)
+    dt_utc = dt_ist.astimezone(pytz.utc)
+
+    # Competition
+    comp_el = soup.select_one(".fixture__competition")
+    competition = comp_el.get_text(strip=True) if comp_el else "Fixture"
+
+    # Broadcasters
+    broadcasters = []
+    for b in soup.select(".fixture__broadcasters img"):
+        broadcasters.append(b.get("alt", "Broadcaster"))
+
+    # Lineups
+    home_team = soup.select_one(".team--home .team__name").get_text(strip=True)
+    away_team = soup.select_one(".team--away .team__name").get_text(strip=True)
+
+    lineups = {}
+    for side, key in [("home", home_team), ("away", away_team)]:
+        players = []
+        for p in soup.select(f".team--{side} .player__name"):
+            players.append(p.get_text(strip=True))
+        lineups[key] = players
+
+    return {
+        "url": url,
+        "teams": f"{home_team} vs. {away_team}",
+        "competition": competition,
+        "venue": venue_text,
+        "datetime": dt_utc,
+        "broadcasters": broadcasters,
+        "lineups": lineups
+    }
 
 def reddit_client():
     return praw.Reddit(
@@ -27,125 +108,65 @@ def reddit_client():
 def already_posted(match):
     if not os.path.exists(MATCH_HISTORY_FILE):
         return False
-    try:
-        with open(MATCH_HISTORY_FILE) as f:
-            data = json.load(f)
-        return match["teams"] in data
-    except Exception:
-        return False
+    with open(MATCH_HISTORY_FILE) as f:
+        data = json.load(f)
+    return match["url"] in data
 
 def save_posted(match):
     data = []
     if os.path.exists(MATCH_HISTORY_FILE):
         with open(MATCH_HISTORY_FILE) as f:
-            try:
-                data = json.load(f)
-            except json.JSONDecodeError:
-                data = []
-    data.append(match["teams"])
+            data = json.load(f)
+    data.append(match["url"])
     with open(MATCH_HISTORY_FILE, "w") as f:
         json.dump(data, f)
 
-def get_post_time(match):
-    """Return the UTC datetime when the match thread should be posted (4 hours before kickoff)."""
-    return match["datetime_utc"] - timedelta(hours=4)
-
-def get_munster_matches():
-    """Fetch Munster fixtures from RugbyKickoff JSON API."""
-    print("Fetching Munster fixtures from RugbyKickoff API...")
-    matches = []
-    try:
-        r = requests.get(API_URL, timeout=20)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        print(f"❌ Error fetching fixtures: {e}")
-        return []
-
-    for item in data.get("fixtures", []):
-        try:
-            opponent = item.get("opponent", "TBC")
-            comp = item.get("competition", "Unknown Competition")
-            venue = item.get("venue", "TBC")
-            date_str = item.get("dateTime")
-            if not date_str:
-                continue
-
-            dt_utc = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-            dt_local = dt_utc.astimezone(IRISH_TZ)
-
-            if dt_utc < datetime.utcnow().replace(tzinfo=pytz.utc):
-                continue
-
-            matches.append({
-                "teams": f"Munster vs. {opponent}" if "Munster" not in opponent else f"{opponent} vs. Munster",
-                "competition": comp,
-                "datetime_utc": dt_utc,
-                "datetime_local": dt_local,
-                "venue": venue,
-                "url": "https://www.rugbykickoff.com/team/munster/"
-            })
-        except Exception:
-            continue
-
-    print(f"✅ Found {len(matches)} future matches.")
-    # Print all upcoming fixtures for debugging
-    for m in matches:
-        print(f" - {m['teams']} | {m['datetime_local'].strftime('%A %d %b %Y %H:%M')} | {m['competition']}")
-    return matches
-
-def get_today_match(matches):
-    now = datetime.utcnow().replace(tzinfo=pytz.utc)
-    for match in matches:
-        if 0 <= (match["datetime_utc"] - now).total_seconds() < 86400:
-            return match
-    return None
-
-def post_match_thread(match, force_post=False):
+def post_match_thread(match):
     reddit = reddit_client()
     subreddit = reddit.subreddit(SUBREDDIT)
 
-    local_dt = match["datetime_local"]
-    formatted_date = local_dt.strftime("%A %d %b %Y @ %H:%Mhrs (IST) - " + match["venue"])
-    title = f"🏉 {match['competition']} | {match['teams']} | {formatted_date}"
-
-    body = (
-        f"**Kickoff:** {formatted_date}\n\n"
-        f"**Competition:** {match['competition']}\n\n"
-        f"**Venue:** {match['venue']}\n\n"
-        f"**Starting XV ⚫🔴⚪**\n\n"
-        f"(To be confirmed)\n\n"
-        f"**Stand Up And Fight! 💪🔴**\n\n"
-        f"*Automated by /u/MunsterKickoff 🤖*"
+    dt_ist = match["datetime"].astimezone(IST)
+    title = (
+        f"Match Thread: {match['teams']} "
+        f"({match['competition']}) - "
+        f"{dt_ist.strftime('%A %d %b %Y @ %H:%M')} (IST) - {match['venue']}"
     )
 
-    if force_post or not already_posted(match):
-        submission = subreddit.submit(title, selftext=body, flair_id=FLAIR_ID)
-        submission.mod.distinguish(sticky=True)
-        print(f"✅ Posted: {title}")
-        save_posted(match)
-    else:
-        print("ℹ️ Match already posted.")
+    # Build body
+    body = f"🏉 **Kickoff:** {dt_ist.strftime('%A %d %B %Y @ %H:%M (IST)')}\n\n"
+    body += f"📍 **Venue:** {match['venue']}\n\n"
+    body += f"🏆 **Competition:** {match['competition']}\n\n"
+    if match["broadcasters"]:
+        body += "📺 **Broadcasters:** " + ", ".join(match["broadcasters"]) + "\n\n"
 
-# ---------------- MAIN ----------------
+    # Starting XV
+    home, away = match["teams"].split(" vs. ")
+    home_players = match["lineups"].get(home, [])
+    away_players = match["lineups"].get(away, [])
+    body += f"🏉 **Starting XV:**\n\n| # | {home} | {away} |\n|:--:|:--:|:--:|\n"
+    for i in range(15):
+        h = home_players[i] if i < len(home_players) else ""
+        a = away_players[i] if i < len(away_players) else ""
+        body += f"| {i+1} | {h} | {a} |\n"
+    body += "\n**Stand Up And Fight! 💪🔴**\n\n"
+    body += f"---\n_MunsterKickoff Bot created by /u/i93_"
+
+    submission = subreddit.submit(title, selftext=body, flair_id=FLAIR_ID)
+    print(f"✅ Posted: {title}")
+    save_posted(match)
+
+def main():
+    match = get_next_munster_match()
+    if not match:
+        print("❌ No upcoming match found.")
+        return
+
+    now = datetime.utcnow().replace(tzinfo=pytz.utc)
+    post_time = match["datetime"] - timedelta(hours=4)
+    if now >= post_time and not already_posted(match):
+        post_match_thread(match)
+    else:
+        print(f"⏳ Not time yet. Kickoff: {match['datetime']} | Post time: {post_time}")
+
 if __name__ == "__main__":
-    matches = get_munster_matches()
-    if not matches:
-        print("❌ No matches found.")
-        exit()
-
-    # Debug: force post for testing
-    today_match = get_today_match(matches)
-    if today_match:
-        post_time = get_post_time(today_match)
-        now = datetime.utcnow().replace(tzinfo=pytz.utc)
-        if now >= post_time:
-            post_match_thread(today_match)
-        else:
-            print(f"🕐 Scheduled post time not reached: {post_time.strftime('%Y-%m-%d %H:%M UTC')}")
-    else:
-        print("ℹ️ No Munster match today or already posted.")
-
-    # Optional: test post immediately
-    # Uncomment next line to force a test post
-    # post_match_thread(matches[0], force_post=True)
+    main()
