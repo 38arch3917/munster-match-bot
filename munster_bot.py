@@ -9,31 +9,37 @@ import json
 TEAM_NAME = "Munster"
 SUBREDDIT = "Munsterrugby"
 MATCH_HISTORY_FILE = "posted.json"
-BASE_URL = "https://www.rugbypass.com/live/"
+FIXTURES_URL = "https://www.rugbypass.com/teams/munster/fixtures-results/"
 FLAIR_ID = "44ddc6a8-a2a2-11f0-ab19-0257fc8eb3f2"
 
 IST = pytz.timezone("Europe/Dublin")
 
 def get_next_munster_match():
-    print("Fetching next Munster match from RugbyPass...")
+    print("🔎 Fetching Munster fixtures from RugbyPass...")
     try:
-        r = requests.get("https://www.rugbypass.com/fixtures/munster/", timeout=20)
+        r = requests.get(FIXTURES_URL, timeout=20)
         r.raise_for_status()
     except Exception as e:
-        print(f"❌ Error fetching fixtures: {e}")
+        print(f"❌ Error fetching fixtures page: {e}")
         return None
 
     soup = BeautifulSoup(r.text, "html.parser")
-    link = soup.select_one('a[href*="/live/munster-vs"], a[href*="/live/vs-munster"]')
-    if not link:
-        print("❌ No upcoming Munster matches found.")
-        return None
+    matches = soup.select("a[href*='/live/']")
 
-    match_url = "https://www.rugbypass.com" + link["href"]
-    return scrape_match_details(match_url)
+    for a in matches:
+        link = a["href"]
+        if "munster" not in link.lower():
+            continue
+        full_url = "https://www.rugbypass.com" + link.split("?")[0]
+        if not already_posted_url(full_url):
+            print(f"✅ Next match found: {full_url}")
+            return scrape_match_details(full_url)
+
+    print("❌ No new Munster matches found.")
+    return None
 
 def scrape_match_details(url):
-    print(f"Scraping match details from {url}")
+    print(f"⚙️ Scraping match details from {url}")
     try:
         r = requests.get(url, timeout=20)
         r.raise_for_status()
@@ -43,19 +49,21 @@ def scrape_match_details(url):
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # Title
-    title_el = soup.select_one("h1")
-    title = title_el.get_text(strip=True) if title_el else "Munster Match"
+    # Teams
+    home_team = soup.select_one(".fixture__team--home .fixture__team-name")
+    away_team = soup.select_one(".fixture__team--away .fixture__team-name")
+    home = home_team.get_text(strip=True) if home_team else "Home"
+    away = away_team.get_text(strip=True) if away_team else "Away"
 
-    # Date, time, and venue
-    meta = soup.select_one(".match-details")
-    meta_text = meta.get_text(" ", strip=True) if meta else ""
-    date_time = soup.select_one(".fixture__date")
-    kickoff_str = date_time.get_text(strip=True) if date_time else ""
+    # Competition and venue
+    comp = soup.select_one(".fixture__competition-name")
+    competition = comp.get_text(strip=True) if comp else "Fixture"
     venue = soup.select_one(".fixture__venue")
     venue_text = venue.get_text(strip=True) if venue else "TBC"
 
-    # Parse kickoff time (if available)
+    # Kickoff time
+    date_el = soup.select_one(".fixture__date")
+    kickoff_str = date_el.get_text(strip=True) if date_el else ""
     dt = datetime.utcnow() + timedelta(days=1)
     for fmt in ("%A %d %B %Y %H:%M", "%d %B %Y %H:%M"):
         try:
@@ -66,29 +74,18 @@ def scrape_match_details(url):
     dt_ist = IST.localize(dt)
     dt_utc = dt_ist.astimezone(pytz.utc)
 
-    # Competition
-    comp_el = soup.select_one(".fixture__competition")
-    competition = comp_el.get_text(strip=True) if comp_el else "Fixture"
-
     # Broadcasters
-    broadcasters = []
-    for b in soup.select(".fixture__broadcasters img"):
-        broadcasters.append(b.get("alt", "Broadcaster"))
+    broadcasters = [img.get("alt", "Broadcaster") for img in soup.select(".fixture__broadcasters img")]
 
     # Lineups
-    home_team = soup.select_one(".team--home .team__name").get_text(strip=True)
-    away_team = soup.select_one(".team--away .team__name").get_text(strip=True)
-
-    lineups = {}
-    for side, key in [("home", home_team), ("away", away_team)]:
-        players = []
+    lineups = {home: [], away: []}
+    for side, team in [("home", home), ("away", away)]:
         for p in soup.select(f".team--{side} .player__name"):
-            players.append(p.get_text(strip=True))
-        lineups[key] = players
+            lineups[team].append(p.get_text(strip=True))
 
     return {
         "url": url,
-        "teams": f"{home_team} vs. {away_team}",
+        "teams": f"{home} vs. {away}",
         "competition": competition,
         "venue": venue_text,
         "datetime": dt_utc,
@@ -105,19 +102,19 @@ def reddit_client():
         user_agent=os.getenv("USER_AGENT")
     )
 
-def already_posted(match):
+def already_posted_url(url):
     if not os.path.exists(MATCH_HISTORY_FILE):
         return False
     with open(MATCH_HISTORY_FILE) as f:
         data = json.load(f)
-    return match["url"] in data
+    return url in data
 
-def save_posted(match):
+def save_posted_url(url):
     data = []
     if os.path.exists(MATCH_HISTORY_FILE):
         with open(MATCH_HISTORY_FILE) as f:
             data = json.load(f)
-    data.append(match["url"])
+    data.append(url)
     with open(MATCH_HISTORY_FILE, "w") as f:
         json.dump(data, f)
 
@@ -132,14 +129,12 @@ def post_match_thread(match):
         f"{dt_ist.strftime('%A %d %b %Y @ %H:%M')} (IST) - {match['venue']}"
     )
 
-    # Build body
     body = f"🏉 **Kickoff:** {dt_ist.strftime('%A %d %B %Y @ %H:%M (IST)')}\n\n"
     body += f"📍 **Venue:** {match['venue']}\n\n"
     body += f"🏆 **Competition:** {match['competition']}\n\n"
     if match["broadcasters"]:
         body += "📺 **Broadcasters:** " + ", ".join(match["broadcasters"]) + "\n\n"
 
-    # Starting XV
     home, away = match["teams"].split(" vs. ")
     home_players = match["lineups"].get(home, [])
     away_players = match["lineups"].get(away, [])
@@ -148,22 +143,23 @@ def post_match_thread(match):
         h = home_players[i] if i < len(home_players) else ""
         a = away_players[i] if i < len(away_players) else ""
         body += f"| {i+1} | {h} | {a} |\n"
+
     body += "\n**Stand Up And Fight! 💪🔴**\n\n"
     body += f"---\n_MunsterKickoff Bot created by /u/i93_"
 
     submission = subreddit.submit(title, selftext=body, flair_id=FLAIR_ID)
     print(f"✅ Posted: {title}")
-    save_posted(match)
+    save_posted_url(match["url"])
 
 def main():
     match = get_next_munster_match()
     if not match:
-        print("❌ No upcoming match found.")
+        print("❌ No match data found.")
         return
 
     now = datetime.utcnow().replace(tzinfo=pytz.utc)
     post_time = match["datetime"] - timedelta(hours=4)
-    if now >= post_time and not already_posted(match):
+    if now >= post_time and not already_posted_url(match["url"]):
         post_match_thread(match)
     else:
         print(f"⏳ Not time yet. Kickoff: {match['datetime']} | Post time: {post_time}")
