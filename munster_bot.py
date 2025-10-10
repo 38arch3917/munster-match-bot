@@ -30,7 +30,13 @@ def get_next_munster_match():
         link = a["href"]
         if "munster" not in link.lower():
             continue
-        full_url = "https://www.rugbypass.com" + link.split("?")[0]
+
+        # ✅ Fix: handle full vs relative URLs
+        if link.startswith("http"):
+            full_url = link.split("?")[0]
+        else:
+            full_url = "https://www.rugbypass.com" + link.split("?")[0]
+
         if not already_posted_url(full_url):
             print(f"✅ Next match found: {full_url}")
             return scrape_match_details(full_url)
@@ -145,7 +151,7 @@ def post_match_thread(match):
         body += f"| {i+1} | {h} | {a} |\n"
 
     body += "\n**Stand Up And Fight! 💪🔴**\n\n"
-    body += f"---\n_MunsterKickoff Bot created by /u/i93_"
+    body += f"---\n_Automated by /u/MunsterKickoff 🤖_"
 
     submission = subreddit.submit(title, selftext=body, flair_id=FLAIR_ID)
     print(f"✅ Posted: {title}")
