@@ -1,27 +1,26 @@
-name: Comment Archive Links
+name: Comment Archive Bot
 
 on:
   schedule:
-    - cron: '*/3 * * * *'  # Runs every 3 minutes
-  workflow_dispatch:        # Allow manual run
+    - cron: "*/1 * * * *"   # Every 1 minute
+  workflow_dispatch:
 
 jobs:
   comment-archives:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install praw requests
 
-      - name: Run Archive Commenter
+      - name: Run comment_archives.py
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
