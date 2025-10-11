@@ -2,18 +2,18 @@ name: Archive Comment Bot
 
 on:
   schedule:
-    - cron: "*/3 * * * *"  # every 3 minutes
-  workflow_dispatch:       # manual trigger
+    - cron: "*/5 * * * *"  # every 5 minutes
+  workflow_dispatch:
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
