@@ -1,22 +1,22 @@
 import praw
 import requests
 import time
-from datetime import datetime, timezone
+import json
+from praw.models import Submission
 
-# ---------- Reddit API Setup ----------
+# ==== CONFIGURATION ====
+SUBREDDIT = "MunsterRugby"
+POSTER_USERNAME = "MannyR1022"
+POSTED_FILE = "archived_posts.json"
+
+# Reddit credentials from GitHub secrets
 REDDIT_CLIENT_ID = "YOUR_CLIENT_ID"
 REDDIT_CLIENT_SECRET = "YOUR_CLIENT_SECRET"
 REDDIT_USERNAME = "MunsterKickoff"
 REDDIT_PASSWORD = "YOUR_PASSWORD"
 USER_AGENT = "MunsterKickoff Bot by u/MunsterKickoff"
 
-# ---------- Subreddit & Settings ----------
-SUBREDDIT = "MunsterRugby"
-SOURCE_USER = "MannyR1022"
-CHECK_INTERVAL = 60  # seconds between runs (1 min)
-COMMENT_TEXT_TEMPLATE = "📰 [Archived Link]({url})\n\n---\n_Automated by /u/MunsterKickoff 🤖_"
-
-# ---------- Connect to Reddit ----------
+# ==== SETUP ====
 reddit = praw.Reddit(
     client_id=REDDIT_CLIENT_ID,
     client_secret=REDDIT_CLIENT_SECRET,
@@ -25,96 +25,76 @@ reddit = praw.Reddit(
     user_agent=USER_AGENT,
 )
 
+# ==== UTILITIES ====
+def load_posted():
+    try:
+        with open(POSTED_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
 
-# ---------- Archive.ph Short Link Creator ----------
-def get_short_archive(url):
+def save_posted(posted):
+    with open(POSTED_FILE, "w") as f:
+        json.dump(posted, f)
+
+def get_archive_link(url):
     """
-    Returns a short archive.ph link (e.g., https://archive.ph/j1bC1)
+    Requests archive.ph to generate or retrieve a short URL for the given article.
     """
     try:
-        session = requests.Session()
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Referer": "https://archive.ph/",
-            "Origin": "https://archive.ph",
-        }
-
-        # Submit the URL for archiving
-        resp = session.post(
-            "https://archive.ph/submit/",
-            data={"url": url},
-            headers=headers,
-            allow_redirects=False,
-            timeout=60,
-        )
-
-        # 1. Check for 'Refresh' header (typical success redirect)
-        refresh = resp.headers.get("Refresh")
-        if refresh and "url=" in refresh:
-            part = refresh.split("url=", 1)[1].strip()
-            if part.startswith("/"):
-                return "https://archive.ph" + part
-            elif part.startswith("http"):
-                return part
-
-        # 2. Check for 'Location' header
-        loc = resp.headers.get("Location")
-        if loc:
-            if loc.startswith("/"):
-                return "https://archive.ph" + loc
-            elif loc.startswith("http"):
-                return loc
-
-        # 3. Follow manually to see final redirected URL
-        follow = session.get(
-            f"https://archive.ph/submit/?url={url}",
-            headers=headers,
-            timeout=60,
-            allow_redirects=True,
-        )
-        if "archive.ph" in follow.url and not follow.url.endswith("/submit/"):
-            return follow.url
-
+        # Request archive.ph to create the archive
+        submit_res = requests.post("https://archive.ph/submit/", data={"url": url}, timeout=30)
+        if submit_res.status_code == 200:
+            # Try to extract the short link from the returned page
+            # archive.ph responds with a redirect or meta refresh URL
+            if "archive.ph/" in submit_res.url and "submit" not in submit_res.url:
+                return submit_res.url
+            # Sometimes it’s in the HTML itself
+            import re
+            match = re.search(r'https://archive\.ph/[A-Za-z0-9]+', submit_res.text)
+            if match:
+                return match.group(0)
+        print(f"⚠️ Could not get short link, fallback to submit URL.")
+        return f"https://archive.ph/submit/?url={url}"
     except Exception as e:
-        print(f"⚠️ Archive.ph error for {url}: {e}")
+        print(f"❌ Archive.ph error: {e}")
+        return f"https://archive.ph/submit/?url={url}"
 
-    # fallback — full submit version
-    return f"https://archive.ph/submit/?url={url}"
-
-
-# ---------- Check and Comment ----------
+# ==== MAIN LOGIC ====
 def process_new_posts():
+    posted = load_posted()
     subreddit = reddit.subreddit(SUBREDDIT)
+
+    print(f"🚀 MunsterKickoff Archive Bot started for r/{SUBREDDIT}")
+    print(f"Checking latest posts...")
+
     for submission in subreddit.new(limit=10):
-        # Only act on posts by the target user
-        if submission.author and submission.author.name.lower() == SOURCE_USER.lower():
-            url = submission.url
-            already_commented = any(
-                comment.author
-                and comment.author.name.lower() == REDDIT_USERNAME.lower()
-                for comment in submission.comments
-            )
-            if already_commented:
-                continue
+        author = str(submission.author).lower() if submission.author else ""
+        if author == POSTER_USERNAME.lower() and "independent.ie" in submission.url:
+            if submission.id not in posted:
+                print(f"🆕 Found new Independent.ie post: {submission.title}")
 
-            print(f"🆕 Found new post: {submission.title}")
+                archive_link = get_archive_link(submission.url)
 
-            # Get short archive link
-            short_link = get_short_archive(url)
-            comment_body = COMMENT_TEXT_TEMPLATE.format(url=short_link)
+                comment_body = (
+                    f"🔗 **Archived version:** {archive_link}\n\n"
+                    "---\n"
+                    "_Automated by /u/MunsterKickoff 🤖_"
+                )
 
-            try:
-                # Post comment
-                comment = submission.reply(comment_body)
-                comment.mod.distinguish(sticky=True)
-                print(f"✅ Commented and stickied: {short_link}")
-            except Exception as e:
-                print(f"❌ Error commenting: {e}")
+                try:
+                    comment = submission.reply(comment_body)
+                    comment.mod.distinguish(sticky=True)
+                    print(f"✅ Commented and stickied on: {submission.title}")
+                    posted.append(submission.id)
+                    save_posted(posted)
+                    time.sleep(5)
+                except Exception as e:
+                    print(f"❌ Failed to comment: {e}")
+            else:
+                print(f"⏭️ Already processed: {submission.title}")
 
+    print("✅ Done checking new posts.")
 
-# ---------- Main Loop ----------
 if __name__ == "__main__":
-    print(f"🚀 MunsterKickoff Archive Bot started at {datetime.now(timezone.utc)}")
-    while True:
-        process_new_posts()
-        time.sleep(CHECK_INTERVAL)
+    process_new_posts()
