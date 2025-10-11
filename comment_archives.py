@@ -2,137 +2,100 @@ import os
 import time
 import praw
 import requests
-import json
-import urllib.parse
+from urllib.parse import quote
 
-SUBREDDIT = "MunsterRugby"
-AUTHOR_TO_MONITOR = "MannyR1022"
-CACHE_FILE = "archive_cache.json"
+# Reddit API credentials (from GitHub secrets)
+REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
+REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
+REDDIT_USERNAME = os.getenv("REDDIT_USERNAME")
+REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD")
+USER_AGENT = os.getenv("USER_AGENT", "MunsterKickoffBot/1.0 by u/MunsterKickoff")
 
+# Subreddit & poster to monitor
+SUBREDDIT_NAME = "MunsterRugby"
+TARGET_USER = "MannyR1022"
 
-def load_cache():
-    """Load cached archive links from JSON file."""
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
+# Initialize Reddit instance
+reddit = praw.Reddit(
+    client_id=REDDIT_CLIENT_ID,
+    client_secret=REDDIT_CLIENT_SECRET,
+    username=REDDIT_USERNAME,
+    password=REDDIT_PASSWORD,
+    user_agent=USER_AGENT,
+)
 
-
-def save_cache(cache):
-    """Save archive link cache to JSON file."""
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=2)
-
-
-def get_short_archive_url(url, cache):
-    """Submit to archive.ph and return the short link, with retry + caching."""
-    if url in cache:
-        print(f"🗂️ Cached archive found for: {url}")
-        return cache[url]
-
-    encoded = urllib.parse.quote_plus(url)
-    fallback = f"https://archive.ph/submit/?url={encoded}"
-
-    for attempt in range(3):
-        try:
-            print(f"📁 Archiving attempt {attempt + 1}: {url}")
-            res = requests.get("https://archive.ph/submit/", params={"url": url}, timeout=25)
-            status = res.status_code
-
-            if status in [200, 302]:
-                # Case 1: direct redirect to short link
-                if res.url.startswith("https://archive.ph/") and "submit" not in res.url:
-                    archive_link = res.url
-                    print(f"✅ Archive success: {archive_link}")
-                    cache[url] = archive_link
-                    save_cache(cache)
-                    return archive_link
-
-                # Case 2: find short link in HTML
-                import re
-                match = re.search(r'https://archive\.ph/\w+', res.text)
-                if match:
-                    archive_link = match.group(0)
-                    print(f"✅ Found short archive link: {archive_link}")
-                    cache[url] = archive_link
-                    save_cache(cache)
-                    return archive_link
-
-            if status == 429:
-                print("⏳ Rate-limited by archive.ph. Waiting before retry...")
-                time.sleep(15 * (attempt + 1))
-                continue
-
-            print(f"⚠️ Archive attempt failed: HTTP {status}")
-
-        except Exception as e:
-            print(f"❌ Error archiving {url}: {e}")
-            time.sleep(10)
-
-    print("⚠️ All attempts failed. Using fallback submit link.")
-    cache[url] = fallback
-    save_cache(cache)
-    return fallback
-
-
-def main():
-    print("🚀 *** Archive Bot started for r/MunsterRugby")
-
-    reddit = praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        username=os.getenv("REDDIT_USERNAME"),
-        password=os.getenv("REDDIT_PASSWORD"),
-        user_agent=os.getenv("USER_AGENT"),
-    )
-
+def get_archive_link(url):
+    """
+    Submit the article to archive.ph and return the shortened link.
+    Handles 429 rate limits gracefully.
+    """
     try:
-        print(f"✅ Logged in as: {reddit.user.me()}")
+        submit_url = f"https://archive.ph/submit/?url={quote(url)}"
+        print(f"📁 Archiving: {url}")
+        response = requests.get(submit_url, timeout=20)
+        if response.status_code == 429:
+            print("⚠️ Archive submission failed: 429 (Rate Limited)")
+            return None
+        elif response.status_code != 200:
+            print(f"⚠️ Unexpected response: {response.status_code}")
+            return None
+
+        # Extract shortened archive link
+        if "archive.ph/" in response.url:
+            return response.url
+
+        # Fallback — extract link manually from redirect or response text
+        for line in response.text.splitlines():
+            if "archive.ph" in line and "href" in line:
+                potential = line.split('"')[1]
+                if potential.startswith("https://archive.ph/") and len(potential) < 40:
+                    return potential
+        return None
     except Exception as e:
-        print(f"❌ Login failed: {e}")
-        exit(1)
+        print(f"⚠️ Error getting archive link: {e}")
+        return None
 
-    subreddit = reddit.subreddit(SUBREDDIT)
-    print(f"👀 Monitoring subreddit: {subreddit.display_name}")
+def already_commented(submission):
+    """Check if bot already commented on this post."""
+    submission.comments.replace_more(limit=0)
+    for comment in submission.comments.list():
+        if comment.author and comment.author.name.lower() == REDDIT_USERNAME.lower():
+            return True
+    return False
 
-    cache = load_cache()
+def process_new_posts():
+    """Check latest subreddit posts and comment if needed."""
+    print(f"🚀 *** Archive Bot started for r/{SUBREDDIT_NAME}")
+    print(f"✅ Logged in as: {REDDIT_USERNAME}")
+    print(f"👀 Monitoring subreddit: {SUBREDDIT_NAME}")
+
+    subreddit = reddit.subreddit(SUBREDDIT_NAME)
 
     for submission in subreddit.new(limit=10):
-        if submission.author and submission.author.name == AUTHOR_TO_MONITOR:
-            print(f"🧾 Found post by {AUTHOR_TO_MONITOR}: {submission.title}")
+        if submission.author and submission.author.name == TARGET_USER:
+            print(f"🧾 Found post by {TARGET_USER}: {submission.title}")
 
-            # Skip if already commented
-            submission.comments.replace_more(limit=0)
-            already_done = any(
-                c.author and c.author.name == reddit.user.me().name for c in submission.comments
-            )
-            if already_done:
+            if already_commented(submission):
                 print("⚙️ Already commented on this post. Skipping.")
                 continue
 
-            url = submission.url
-            short_link = get_short_archive_url(url, cache)
-
-            comment_body = (
-                f"🔗 [Archive link for this article]({short_link})\n\n"
-                f"---\n"
-                f"_Automated by /u/MunsterKickoff 🤖_"
-            )
-
-            try:
-                print("💬 Posting comment...")
-                comment = submission.reply(comment_body)
-                comment.mod.distinguish(sticky=True)
-                print("✅ Comment posted and stickied successfully.")
-            except Exception as e:
-                print(f"❌ Error posting comment: {e}")
-
-            # avoid hitting Reddit rate limits
-            time.sleep(10)
-
+            # Look for independent.ie links
+            if "independent.ie" in submission.url:
+                archive_link = get_archive_link(submission.url)
+                if archive_link:
+                    comment_text = (
+                        f"🔥 **Archived:** {archive_link}\n\n"
+                        f"*Automated by /u/MunsterKickoff 🤖*"
+                    )
+                    comment = submission.reply(comment_text)
+                    comment.mod.distinguish(sticky=True)
+                    print(f"✅ Commented and stickied on: {submission.title}")
+                else:
+                    print("⚠️ No archive link found. Skipping post.")
+            else:
+                print("🔗 Post not from independent.ie, skipping.")
+        else:
+            print("🕵️ No new target posts found or from another user.")
 
 if __name__ == "__main__":
-    main()
+    process_new_posts()
