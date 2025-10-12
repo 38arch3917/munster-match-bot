@@ -1,23 +1,31 @@
-name: Run Munster Match Bot
+name: Munster Match Thread Bot
+
 on:
   schedule:
-    - cron: '0 * * * *'   # every hour
-  workflow_dispatch:
+    - cron: "0 * * * *"  # Runs hourly to check for matches within 3 hours
+  workflow_dispatch:      # Allows manual runs
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - run: pip install requests beautifulsoup4 python-dateutil praw pytz
-      - name: Run bot
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install praw requests beautifulsoup4 pytz
+
+      - name: Run Munster Match Thread Bot
         env:
-          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
-          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
-          USER_AGENT: ${{ secrets.USER_AGENT }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          USER_AGENT: "MunsterKickoffBot:v1.0 (by u/MunsterKickoff)"
         run: python munster_bot.py
