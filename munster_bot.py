@@ -95,28 +95,43 @@ def find_next_match(fixtures):
     return None
 
 
-def get_urc_standings():
-    """Scrape URC standings from Wikipedia."""
-    print("📊 Fetching URC standings...")
-    r = requests.get("https://en.wikipedia.org/wiki/United_Rugby_Championship")
+def get_wikipedia_table(url, heading_keywords):
+    """Find and format a table from Wikipedia by heading keywords."""
+    r = requests.get(url)
     soup = BeautifulSoup(r.text, "html.parser")
-    table = soup.find("table", {"class": "wikitable"})
-    if not table:
-        return "⚠️ Standings not available."
-    standings = "| Pos | Team | P | W | L | D | Pts |\n|:--:|:--|:--:|:--:|:--:|:--:|:--:|\n"
-    for row in table.find_all("tr")[1:9]:  # Top 8 teams
-        cols = [td.get_text(" ", strip=True) for td in row.find_all("td")]
-        if len(cols) >= 7:
-            standings += f"| {cols[0]} | {cols[1]} | {cols[2]} | {cols[3]} | {cols[4]} | {cols[5]} | {cols[6]} |\n"
-    return standings
+    tables = soup.find_all("table", {"class": "wikitable"})
+    for table in tables:
+        heading = table.find_previous("h2")
+        if heading and any(kw.lower() in heading.text.lower() for kw in heading_keywords):
+            formatted = "| Pos | Team | P | W | L | D | Pts |\n|:--:|:--|:--:|:--:|:--:|:--:|:--:|\n"
+            for row in table.find_all("tr")[1:9]:
+                cols = [td.get_text(" ", strip=True) for td in row.find_all("td")]
+                if len(cols) >= 7:
+                    formatted += f"| {cols[0]} | {cols[1]} | {cols[2]} | {cols[3]} | {cols[4]} | {cols[5]} | {cols[6]} |\n"
+            return formatted
+    return None
+
+
+def get_standings(competition):
+    """Select correct standings source."""
+    if "URC" in competition.upper() or "UNITED RUGBY" in competition.upper():
+        print("📊 Fetching URC standings...")
+        return get_wikipedia_table("https://en.wikipedia.org/wiki/United_Rugby_Championship", ["Standings", "Table"])
+    elif "CHAMPIONS" in competition.upper():
+        print("📊 Fetching Champions Cup standings...")
+        return get_wikipedia_table("https://en.wikipedia.org/wiki/2025–26_European_Rugby_Champions_Cup", ["Pool", "Standings"])
+    elif "CHALLENGE" in competition.upper():
+        print("📊 Fetching Challenge Cup standings...")
+        return get_wikipedia_table("https://en.wikipedia.org/wiki/2025–26_European_Rugby_Challenge_Cup", ["Pool", "Standings"])
+    return None
 
 
 def create_post_title(fixture):
     opponent = fixture[1]
     competition = fixture[-1]
-    date = fixture[0].split()[0:3]
-    day = date[0][:3] if date else "TBC"
-    return f"🏉 Munster vs {opponent} | {competition} | {day}"
+    date_parts = fixture[0].split()
+    day_abbrev = date_parts[0][:3] if date_parts else "TBC"
+    return f"🏉 Munster vs {opponent} | {competition} | {day_abbrev}"
 
 
 def create_post_body(fixture):
@@ -124,7 +139,7 @@ def create_post_body(fixture):
     opponent = fixture[1]
     venue = fixture[2] if len(fixture) > 2 else "TBC"
     competition = fixture[-1]
-    standings = get_urc_standings() if "URC" in competition.upper() or "United Rugby" in competition else None
+    standings = get_standings(competition)
 
     body = f"""
 🏉 **Fixture:** Munster vs {opponent}
@@ -144,7 +159,6 @@ _Automated by /u/MunsterKickoff 🤖_
 
 
 def post_thread(reddit, fixture):
-    """Post match thread to Reddit."""
     subreddit = reddit.subreddit(SUBREDDIT)
     title = create_post_title(fixture)
     body = create_post_body(fixture)
