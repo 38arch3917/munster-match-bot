@@ -3,7 +3,7 @@ name: Munster Match Thread Bot
 on:
   schedule:
     - cron: "0 * * * *"  # Runs hourly to check for matches within 3 hours
-  workflow_dispatch:      # Allows manual runs
+  workflow_dispatch:
 
 jobs:
   run:
@@ -27,5 +27,5 @@ jobs:
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}
-          USER_AGENT: "MunsterKickoffBot:v1.0 (by u/MunsterKickoff)"
+          USER_AGENT: "MunsterKickoffBot:v2.0 (by u/MunsterKickoff)"
         run: python munster_bot.py
