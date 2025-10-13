@@ -1,89 +1,94 @@
 import requests
 import mwparserfromhell
-from dateutil import parser
-from datetime import datetime, timezone
+import praw
+from datetime import datetime
 
-# Wikipedia page for Munster Rugby season
-SEASON_PAGE = "2025-26_Munster_Rugby_season"
+# ----------------------------
+# CONFIG
+# ----------------------------
+SEASON_PAGE = "2025-26_Munster_Rugby_season"  # Wikipedia page for the season
+REDDIT_CLIENT_ID = "your_client_id"
+REDDIT_CLIENT_SECRET = "your_client_secret"
+REDDIT_USERNAME = "your_username"
+REDDIT_PASSWORD = "your_password"
+USER_AGENT = "MunsterKickoffBot/1.0 (by /u/YourRedditUsername)"
 
-def get_wikitext(title):
-    """
-    Fetches the wikitext of a Wikipedia page via MediaWiki API
-    """
-    S = requests.Session()
-    URL = "https://en.wikipedia.org/w/api.php"
+# ----------------------------
+# FETCH WIKIPEDIA PAGE
+# ----------------------------
+def get_wikitext(page):
+    url = "https://en.wikipedia.org/w/api.php"
     params = {
         "action": "query",
         "prop": "revisions",
         "rvprop": "content",
         "format": "json",
-        "titles": title
+        "titles": page
+    }
+    headers = {
+        "User-Agent": USER_AGENT
     }
 
-    res = S.get(url=URL, params=params)
+    res = requests.get(url, params=params, headers=headers)
     res.raise_for_status()
     data = res.json()
+    pageid = next(iter(data["query"]["pages"]))
+    if "revisions" not in data["query"]["pages"][pageid]:
+        raise ValueError("Could not fetch page revisions")
+    return data["query"]["pages"][pageid]["revisions"][0]["*"]
 
-    pages = data['query']['pages']
-    page = next(iter(pages.values()))
-    return page['revisions'][0]['*']
-
-def parse_rugbyboxes(wikitext):
-    """
-    Extract all rugbybox templates from wikitext and return a list of match dicts
-    """
+# ----------------------------
+# PARSE FIXTURES FROM WIKITEXT
+# ----------------------------
+def parse_fixtures(wikitext):
     wikicode = mwparserfromhell.parse(wikitext)
-    boxes = wikicode.filter_templates(matches=lambda t: t.name.strip().lower().startswith("rugbybox"))
-    
-    matches = []
-    for box in boxes:
-        match = {}
-        match['date'] = box.get('date').value.strip() if box.has('date') else None
-        match['time'] = box.get('time').value.strip() if box.has('time') else None
-        # home/away or team1/team2
-        match['home'] = box.get('home').value.strip() if box.has('home') else (box.get('team1').value.strip() if box.has('team1') else None)
-        match['away'] = box.get('away').value.strip() if box.has('away') else (box.get('team2').value.strip() if box.has('team2') else None)
-        match['stadium'] = box.get('stadium').value.strip() if box.has('stadium') else None
-        match['competition'] = None  # We'll assign later if needed
-        matches.append(match)
-    return matches
+    fixtures = []
 
-def filter_future_matches(matches):
-    """
-    Filters matches to only those in the future
-    """
-    upcoming = []
-    now = datetime.now(timezone.utc)
-    for m in matches:
-        if m['date']:
-            try:
-                # Combine date and time if available
-                dt_str = m['date'] + (' ' + m['time'] if m['time'] else '')
-                dt = parser.parse(dt_str, dayfirst=True)
-                # Convert naive datetime to UTC if needed
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                if dt > now:
-                    m['datetime'] = dt
-                    upcoming.append(m)
-            except Exception as e:
-                continue
-    return sorted(upcoming, key=lambda x: x['datetime'])
+    # Find all rugbybox templates
+    for template in wikicode.filter_templates(matches=lambda t: t.name.lower().strip().startswith("rugbybox")):
+        fixture = {
+            "date": template.get("date").value.strip() if template.has("date") else "",
+            "time": template.get("time").value.strip() if template.has("time") else "",
+            "home": str(template.get("home").value.strip()) if template.has("home") else "",
+            "away": str(template.get("away").value.strip()) if template.has("away") else "",
+            "score": template.get("score").value.strip() if template.has("score") else "",
+            "stadium": template.get("stadium").value.strip() if template.has("stadium") else "",
+        }
+        fixtures.append(fixture)
 
+    return fixtures
+
+# ----------------------------
+# REDDIT LOGIN
+# ----------------------------
+def reddit_login():
+    reddit = praw.Reddit(
+        client_id=REDDIT_CLIENT_ID,
+        client_secret=REDDIT_CLIENT_SECRET,
+        username=REDDIT_USERNAME,
+        password=REDDIT_PASSWORD,
+        user_agent=USER_AGENT
+    )
+    return reddit
+
+# ----------------------------
+# MAIN
+# ----------------------------
 def main():
     print("🚀 Munster Bot Starting...")
     wikitext = get_wikitext(SEASON_PAGE)
-    matches = parse_rugbyboxes(wikitext)
-    upcoming = filter_future_matches(matches)
-    
-    if not upcoming:
-        print("❌ No upcoming fixtures found.")
+    fixtures = parse_fixtures(wikitext)
+
+    if not fixtures:
+        print("❌ No fixtures found.")
         return
 
-    print(f"✅ Found {len(upcoming)} upcoming fixtures:\n")
-    for m in upcoming:
-        date_str = m['datetime'].strftime("%d %b %Y %H:%M")
-        print(f"{date_str} | {m['home']} vs {m['away']} | Stadium: {m['stadium']}")
+    print(f"✅ Found {len(fixtures)} fixtures.")
+    for f in fixtures:
+        print(f"{f['date']} | {f['home']} vs {f['away']} | {f['score']} | {f['stadium']}")
+
+    reddit = reddit_login()
+    print(f"✅ Logged in as: {reddit.user.me()}")
 
 if __name__ == "__main__":
     main()
