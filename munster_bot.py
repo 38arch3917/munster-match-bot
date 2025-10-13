@@ -13,7 +13,7 @@ POST_HOURS_BEFORE = 3
 
 WIKIPEDIA_BASE = "https://en.wikipedia.org/wiki/"
 WIKIPEDIA_MAIN_PAGE = "Munster_Rugby"
-USER_AGENT = "script:munster_match_bot:v4 (by u/MunsterKickoff)"
+USER_AGENT = "script:munster_match_bot:v5 (by u/MunsterKickoff)"
 
 # === REDDIT LOGIN ===
 def reddit_login():
@@ -32,20 +32,16 @@ def get_current_season_url():
     headers = {"User-Agent": USER_AGENT}
     res = requests.get(WIKIPEDIA_BASE + WIKIPEDIA_MAIN_PAGE, headers=headers)
     soup = BeautifulSoup(res.text, "html.parser")
-    year = datetime.utcnow().year  # Use UTC for GitHub Actions
+    year = datetime.utcnow().year  # UTC to match GitHub Actions
+
     links = soup.select("a[href*='Munster_Rugby_']")
-    
-    # Debug: print all found links
-    # print([link.get("href") for link in links])
-    
     for link in links:
         href = link.get("href", "")
-        # Handle formats like 2023–24
         if re.search(rf"{year}–\d{{2}}", href) or str(year) in href or str(year+1) in href:
             return "https://en.wikipedia.org" + href
     return None
 
-# === PARSE FIXTURES ===
+# === PARSE FIXTURES (ROBUST) ===
 def parse_fixtures(url):
     headers = {"User-Agent": USER_AGENT}
     res = requests.get(url, headers=headers)
@@ -53,22 +49,36 @@ def parse_fixtures(url):
 
     tables = soup.find_all("table", {"class": "wikitable"})
     fixtures = []
+
     for table in tables:
         headers_row = [th.get_text(strip=True).lower() for th in table.find_all("th")]
-        if any(h in headers_row for h in ["opponent", "fixture", "opposition"]):
+
+        # Relaxed detection of fixture tables
+        if any(re.search(r"opponent|fixture|opposition|team|vs|date", h) for h in headers_row):
             for row in table.find_all("tr")[1:]:
                 cols = [td.get_text(" ", strip=True) for td in row.find_all(["td", "th"])]
-                if len(cols) < 3:
+                if len(cols) < 2:
                     continue
+
+                # Map columns to keys (use headers if possible)
                 data = dict(zip(headers_row, cols))
-                date = data.get("date") or data.get("day") or ""
-                opponent = data.get("opponent") or data.get("opposition") or data.get("fixture") or ""
+
+                # Fallbacks if headers don't exist
+                date = data.get("date") or cols[0] or ""
+                opponent = (
+                    data.get("opponent")
+                    or data.get("opposition")
+                    or data.get("fixture")
+                    or data.get("team")
+                    or (cols[1] if len(cols) > 1 else "")
+                )
                 venue = data.get("venue") or data.get("stadium") or ""
                 competition = data.get("competition") or ""
                 kickoff_time = None
                 match = re.search(r"(\d{1,2}:\d{2})", " ".join(cols))
                 if match:
                     kickoff_time = match.group(1)
+
                 fixtures.append({
                     "date": date,
                     "opponent": opponent,
@@ -76,9 +86,10 @@ def parse_fixtures(url):
                     "competition": competition,
                     "kickoff_time": kickoff_time
                 })
+
     return fixtures
 
-# === PARSE STANDINGS (URC or Europe) ===
+# === PARSE STANDINGS ===
 def parse_standings(soup):
     standings = []
     tables = soup.find_all("table", {"class": "wikitable"})
@@ -133,7 +144,7 @@ def get_next_fixture(fixtures):
     now = datetime.utcnow().replace(tzinfo=pytz.UTC)
     for fx in fixtures:
         date_text = fx['date']
-        # Try multiple date formats
+        # Try parsing multiple formats
         for fmt in ("%d %B %Y", "%d %b %Y"):
             try:
                 parsed = datetime.strptime(date_text.split()[0:3][0] + " " + " ".join(date_text.split()[1:3]), fmt)
@@ -179,7 +190,6 @@ def main():
     title = f"[Match Thread] {TEAM_NAME} vs {next_fixture['opponent']} ({short_day})"
     body = format_post(next_fixture, standings_text)
 
-    # Post time (3 hours before kickoff)
     subreddit = reddit.subreddit(SUBREDDIT)
     subreddit.submit(title, selftext=body)
     print("✅ Posted match thread successfully.")
