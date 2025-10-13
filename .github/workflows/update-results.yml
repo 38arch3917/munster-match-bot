@@ -1,12 +1,12 @@
-name: Update Munster Match Scores
+name: Update Match Results
 
 on:
   schedule:
-    - cron: '0 * * * *'   # Runs every hour
-  workflow_dispatch:
+    - cron: "*/30 * * * *"  # Runs every 30 minutes
+  workflow_dispatch:        # Allows manual trigger too
 
 jobs:
-  update-scores:
+  update-results:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -15,16 +15,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install praw requests beautifulsoup4 pytz
+        run: pip install -r requirements.txt
 
-      - name: Run update script
+      - name: Run results updater
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
-          USER_AGENT: ${{ secrets.USER_AGENT }}
-        run: python scripts/update_scores.py
+          REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
+        run: python update_results.py
