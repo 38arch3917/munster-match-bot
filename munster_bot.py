@@ -13,7 +13,7 @@ POST_HOURS_BEFORE = 3
 
 WIKIPEDIA_BASE = "https://en.wikipedia.org/wiki/"
 WIKIPEDIA_MAIN_PAGE = "Munster_Rugby"
-USER_AGENT = "script:munster_match_bot:v6 (by u/MunsterKickoff)"
+USER_AGENT = "script:munster_match_bot:v7 (by u/MunsterKickoff)"
 
 # === REDDIT LOGIN ===
 def reddit_login():
@@ -53,6 +53,7 @@ def parse_fixtures(url):
     for table in tables:
         headers_row = [th.get_text(strip=True).lower() for th in table.find_all("th")]
 
+        # Relaxed detection of fixture tables
         if any(re.search(r"opponent|fixture|opposition|team|vs|date|time", h) for h in headers_row):
             for row in table.find_all("tr")[1:]:
                 cols = [td.get_text(" ", strip=True) for td in row.find_all(["td", "th"])]
@@ -62,7 +63,7 @@ def parse_fixtures(url):
                 data = dict(zip(headers_row, cols))
 
                 # Extract date
-                date = data.get("date") or cols[0] or ""
+                date = data.get("date") or cols[0]
 
                 # Extract opponent / fixture name
                 opponent = (
@@ -77,8 +78,8 @@ def parse_fixtures(url):
                 venue = data.get("venue") or data.get("stadium") or ""
                 competition = data.get("competition") or ""
 
-                # Kickoff time: check header 'time' or last column
-                kickoff_time = data.get("kickoff") or data.get("time") or None
+                # Kickoff time: header or regex fallback
+                kickoff_time = data.get("kickoff") or data.get("time")
                 if not kickoff_time:
                     match = re.search(r"(\d{1,2}:\d{2})", " ".join(cols))
                     if match:
@@ -148,21 +149,20 @@ def format_post(fixture, standings_text):
 def get_next_fixture(fixtures):
     now = datetime.utcnow().replace(tzinfo=pytz.UTC)
     for fx in fixtures:
-        date_str = fx['date']
-        time_str = fx.get('kickoff_time') or "00:00"
+        # Take only day, month, year for date parsing
+        date_parts = fx['date'].strip().split()[0:3]
+        date_str = " ".join(date_parts)
+        time_str = fx.get("kickoff_time") or "00:00"
         dt_str = f"{date_str} {time_str}"
 
-        # Try full date + time parsing
         try:
-            parsed = datetime.strptime(dt_str, "%d %B %Y %H:%M")
-            parsed = parsed.replace(tzinfo=pytz.UTC)
+            parsed = datetime.strptime(dt_str, "%d %B %Y %H:%M").replace(tzinfo=pytz.UTC)
             if parsed > now:
                 return fx
         except Exception:
-            # Fallback: date only
+            # fallback to date-only parsing
             try:
-                parsed = datetime.strptime(date_str, "%d %B %Y")
-                parsed = parsed.replace(tzinfo=pytz.UTC)
+                parsed = datetime.strptime(date_str, "%d %B %Y").replace(tzinfo=pytz.UTC)
                 if parsed > now:
                     return fx
             except Exception:
@@ -184,6 +184,11 @@ def main():
     if not fixtures:
         print("❌ No fixtures found.")
         return
+
+    # Debug: print all parsed fixtures
+    print(f"Found {len(fixtures)} fixtures:")
+    for f in fixtures:
+        print(f)
 
     next_fixture = get_next_fixture(fixtures)
     if not next_fixture:
