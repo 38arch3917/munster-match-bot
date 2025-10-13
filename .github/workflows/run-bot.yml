@@ -36,4 +36,4 @@ jobs:
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
           USER_AGENT: "MunsterKickoffBot/1.0 (by /u/MunsterKickoff)"
-        run: python update_results.py --debug
+        run: python update_results.py
