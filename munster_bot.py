@@ -9,7 +9,7 @@ import re
 SUBREDDIT = "MunsterRugby"
 TEAM_NAME = "Munster"
 POST_HOURS_BEFORE = 3
-USER_AGENT = "script:munster_match_bot:v8 (by u/MunsterKickoff)"
+USER_AGENT = "script:munster_match_bot:v9 (by u/MunsterKickoff)"
 SEASON_PAGE = "2025-26_Munster_Rugby_season"
 
 # === REDDIT LOGIN ===
@@ -35,10 +35,21 @@ def get_wikitext(page):
         "format": "json",
         "rvslots": "main"
     }
-    res = requests.get(URL, params=params)
-    data = res.json()
-    page_data = next(iter(data["query"]["pages"].values()))
-    return page_data["revisions"][0]["slots"]["main"]["*"]
+    headers = {"User-Agent": USER_AGENT}
+    res = requests.get(URL, params=params, headers=headers)
+    
+    if res.status_code != 200:
+        print(f"❌ Wikipedia API request failed with status code {res.status_code}")
+        print(res.text[:500])  # debug first 500 chars
+        return None
+    
+    try:
+        data = res.json()
+        page_data = next(iter(data["query"]["pages"].values()))
+        return page_data["revisions"][0]["slots"]["main"]["*"]
+    except Exception as e:
+        print(f"❌ Failed to parse Wikipedia JSON: {e}")
+        return None
 
 # === PARSE RUGBYBOX FIXTURES ===
 def parse_rugbybox_fixtures(wikitext):
@@ -107,6 +118,10 @@ def main():
 
     reddit = reddit_login()
     wikitext = get_wikitext(SEASON_PAGE)
+    if not wikitext:
+        print("❌ Could not fetch Wikipedia wikitext.")
+        return
+
     fixtures = parse_rugbybox_fixtures(wikitext)
     if not fixtures:
         print("❌ No fixtures found.")
