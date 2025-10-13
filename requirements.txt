@@ -1,6 +1,7 @@
-praw
-requests
-beautifulsoup4
-python-dateutil
-pytz
-mwparserfromhell
+praw==7.7.0
+requests==2.32.0
+beautifulsoup4==4.12.2
+python-dateutil==2.9.2
+pytz==2025.7
+mwparserfromhell==0.6.3
+lxml==4.9.3
