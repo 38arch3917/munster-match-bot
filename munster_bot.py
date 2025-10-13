@@ -13,7 +13,7 @@ POST_HOURS_BEFORE = 3
 
 WIKIPEDIA_BASE = "https://en.wikipedia.org/wiki/"
 WIKIPEDIA_MAIN_PAGE = "Munster_Rugby"
-USER_AGENT = "script:munster_match_bot:v5 (by u/MunsterKickoff)"
+USER_AGENT = "script:munster_match_bot:v6 (by u/MunsterKickoff)"
 
 # === REDDIT LOGIN ===
 def reddit_login():
@@ -32,7 +32,7 @@ def get_current_season_url():
     headers = {"User-Agent": USER_AGENT}
     res = requests.get(WIKIPEDIA_BASE + WIKIPEDIA_MAIN_PAGE, headers=headers)
     soup = BeautifulSoup(res.text, "html.parser")
-    year = datetime.utcnow().year  # UTC to match GitHub Actions
+    year = datetime.utcnow().year
 
     links = soup.select("a[href*='Munster_Rugby_']")
     for link in links:
@@ -53,18 +53,18 @@ def parse_fixtures(url):
     for table in tables:
         headers_row = [th.get_text(strip=True).lower() for th in table.find_all("th")]
 
-        # Relaxed detection of fixture tables
-        if any(re.search(r"opponent|fixture|opposition|team|vs|date", h) for h in headers_row):
+        if any(re.search(r"opponent|fixture|opposition|team|vs|date|time", h) for h in headers_row):
             for row in table.find_all("tr")[1:]:
                 cols = [td.get_text(" ", strip=True) for td in row.find_all(["td", "th"])]
                 if len(cols) < 2:
                     continue
 
-                # Map columns to keys (use headers if possible)
                 data = dict(zip(headers_row, cols))
 
-                # Fallbacks if headers don't exist
+                # Extract date
                 date = data.get("date") or cols[0] or ""
+
+                # Extract opponent / fixture name
                 opponent = (
                     data.get("opponent")
                     or data.get("opposition")
@@ -72,12 +72,17 @@ def parse_fixtures(url):
                     or data.get("team")
                     or (cols[1] if len(cols) > 1 else "")
                 )
+
+                # Venue / Competition
                 venue = data.get("venue") or data.get("stadium") or ""
                 competition = data.get("competition") or ""
-                kickoff_time = None
-                match = re.search(r"(\d{1,2}:\d{2})", " ".join(cols))
-                if match:
-                    kickoff_time = match.group(1)
+
+                # Kickoff time: check header 'time' or last column
+                kickoff_time = data.get("kickoff") or data.get("time") or None
+                if not kickoff_time:
+                    match = re.search(r"(\d{1,2}:\d{2})", " ".join(cols))
+                    if match:
+                        kickoff_time = match.group(1)
 
                 fixtures.append({
                     "date": date,
@@ -143,11 +148,20 @@ def format_post(fixture, standings_text):
 def get_next_fixture(fixtures):
     now = datetime.utcnow().replace(tzinfo=pytz.UTC)
     for fx in fixtures:
-        date_text = fx['date']
-        # Try parsing multiple formats
-        for fmt in ("%d %B %Y", "%d %b %Y"):
+        date_str = fx['date']
+        time_str = fx.get('kickoff_time') or "00:00"
+        dt_str = f"{date_str} {time_str}"
+
+        # Try full date + time parsing
+        try:
+            parsed = datetime.strptime(dt_str, "%d %B %Y %H:%M")
+            parsed = parsed.replace(tzinfo=pytz.UTC)
+            if parsed > now:
+                return fx
+        except Exception:
+            # Fallback: date only
             try:
-                parsed = datetime.strptime(date_text.split()[0:3][0] + " " + " ".join(date_text.split()[1:3]), fmt)
+                parsed = datetime.strptime(date_str, "%d %B %Y")
                 parsed = parsed.replace(tzinfo=pytz.UTC)
                 if parsed > now:
                     return fx
