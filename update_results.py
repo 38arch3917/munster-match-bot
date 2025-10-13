@@ -1,81 +1,96 @@
-import praw
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
-import re
+#!/usr/bin/env python3
+"""
+update_results.py
+Adds FULL TIME line to the latest posted match threads once scores appear on Wikipedia.
+"""
+
 import os
+import re
+import pytz
+import requests
+import json
+from bs4 import BeautifulSoup
 
-WIKI_URL = "https://en.wikipedia.org/wiki/2025–26_Munster_Rugby_season"
-SUBREDDIT_NAME = "MunsterRugby"
+TEAM = "Munster"
+POSTED_FILE = "posted.json"
+HEADERS = {"User-Agent": "MunsterKickoffBot/1.0 (by /u/MunsterKickoff)"}
 
-def get_latest_result():
-    """Scrape Wikipedia for Munster’s latest finished match and score."""
-    print("🔎 Checking Wikipedia for latest result...")
-    res = requests.get(WIKI_URL, headers={"User-Agent": "Mozilla/5.0"})
-    soup = BeautifulSoup(res.text, "html.parser")
-
-    table = soup.find("table", {"class": "wikitable"})
-    if not table:
-        print("⚠️ No fixture table found.")
+def safe_get(url):
+    try:
+        r = requests.get(url, timeout=15, headers=HEADERS)
+        r.raise_for_status()
+        return r
+    except Exception as e:
+        print("Error:", e)
         return None
 
-    rows = table.find_all("tr")
-    latest = None
+def load_posted():
+    if not os.path.exists(POSTED_FILE):
+        return []
+    try:
+        with open(POSTED_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
 
-    for row in rows:
-        cols = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
-        if len(cols) < 5:
-            continue
-        opponent = cols[1]
-        result = cols[-2]
-        score = cols[-1]
-
-        # Match format like "W 27–20" or "L 10–13"
-        if re.search(r"\d+[\u2013-]\d+", score):
-            latest = {
-                "opponent": opponent,
-                "result": result,
-                "score": score.replace("–", "-")
-            }
-
-    if latest:
-        print(f"✅ Found latest result: {latest['score']} vs {latest['opponent']}")
-    else:
-        print("❌ No final score found yet.")
-
-    return latest
-
-def update_reddit_post(result):
-    """Finds and edits the Reddit post to include final score."""
-    reddit = praw.Reddit(
+def reddit_client():
+    import praw
+    return praw.Reddit(
         client_id=os.getenv("REDDIT_CLIENT_ID"),
         client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
         username=os.getenv("REDDIT_USERNAME"),
         password=os.getenv("REDDIT_PASSWORD"),
-        user_agent=os.getenv("REDDIT_USER_AGENT")
+        user_agent=os.getenv("USER_AGENT", "MunsterKickoffBot/1.0 (by /u/MunsterKickoff)")
     )
 
-    subreddit = reddit.subreddit(SUBREDDIT_NAME)
-    posts = list(subreddit.new(limit=10))
+def find_final_score(page, opponent):
+    r = safe_get("https://en.wikipedia.org/wiki/" + page.replace(" ", "_"))
+    if not r: return None
+    soup = BeautifulSoup(r.text, "html.parser")
+    for tr in soup.select("tr"):
+        txt = tr.get_text(" ", strip=True)
+        if TEAM.lower() in txt.lower() and opponent.lower() in txt.lower():
+            m = re.search(r"(\d{1,3})\s*[–-]\s*(\d{1,3})", txt)
+            if not m: continue
+            a, b = m.groups()
+            if txt.lower().find(TEAM.lower()) < txt.lower().find(opponent.lower()):
+                return f"**_FULL TIME: Munster {a} - {b} {opponent} 🏉_**"
+            else:
+                return f"**_FULL TIME: Munster {b} - {a} {opponent} 🏉_**"
+    return None
 
-    target_post = None
-    for post in posts:
-        if "Match Thread" in post.title and result["opponent"].lower() in post.title.lower():
-            target_post = post
-            break
-
-    if not target_post:
-        print("⚠️ No matching match thread found.")
+def update_posts():
+    posted = load_posted()
+    if not posted: 
+        print("No posted.json entries.")
         return
-
-    new_text = f"**_FULL TIME: Munster {result['score']} {result['opponent']} 🏉_**\n\n\n{target_post.selftext}"
-    target_post.edit(new_text)
-    print(f"✅ Updated Reddit post: {target_post.title}")
+    reddit = reddit_client()
+    sr = reddit.subreddit("Munsterrugby")
+    recent = list(sr.new(limit=30))
+    for key in posted:
+        parts = key.split("|")
+        if len(parts) < 2: continue
+        opponent = parts[0].strip()
+        date_text = parts[1].strip()
+        match_post = None
+        for p in recent:
+            if TEAM.lower() in p.title.lower() and opponent.lower() in p.title.lower():
+                match_post = p
+                break
+        if not match_post:
+            continue
+        page = "Munster_Rugby"
+        score_md = find_final_score(page, opponent)
+        if not score_md:
+            continue
+        if "FULL TIME:" in (match_post.selftext or ""):
+            continue
+        new_body = score_md + "\n\n\n" + match_post.selftext
+        try:
+            match_post.edit(new_body)
+            print(f"✅ Updated {p.title}")
+        except Exception as e:
+            print("❌ Edit failed:", e)
 
 if __name__ == "__main__":
-    print("🚀 *** Munster Results Updater Started ***")
-    result = get_latest_result()
-    if result:
-        update_reddit_post(result)
-    else:
-        print("🛑 No result found to update.")
+    update_posts()
