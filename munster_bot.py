@@ -1,15 +1,15 @@
 import os
 import praw
 import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
-import re
 
 # === CONFIG ===
 SUBREDDIT = "MunsterRugby"
 TEAM_NAME = "Munster"
 POST_HOURS_BEFORE = 3
-USER_AGENT = "script:munster_match_bot:v9 (by u/MunsterKickoff)"
+USER_AGENT = "script:munster_match_bot:v11 (by u/MunsterKickoff)"
 SEASON_PAGE = "2025-26_Munster_Rugby_season"
 
 # === REDDIT LOGIN ===
@@ -24,55 +24,73 @@ def reddit_login():
     print(f"✅ Logged in as: {reddit.user.me()}")
     return reddit
 
-# === GET RAW WIKITEXT ===
-def get_wikitext(page):
+# === FETCH MATCHES SECTION HTML VIA WIKIPEDIA API ===
+def fetch_matches_section_html(page_title):
     URL = "https://en.wikipedia.org/w/api.php"
-    params = {
-        "action": "query",
-        "prop": "revisions",
-        "titles": page,
-        "rvprop": "content",
-        "format": "json",
-        "rvslots": "main"
-    }
     headers = {"User-Agent": USER_AGENT}
-    res = requests.get(URL, params=params, headers=headers)
-    
+
+    # Step 1: Get sections
+    params_sections = {
+        "action": "parse",
+        "page": page_title,
+        "prop": "sections",
+        "format": "json"
+    }
+    res = requests.get(URL, params=params_sections, headers=headers)
     if res.status_code != 200:
-        print(f"❌ Wikipedia API request failed with status code {res.status_code}")
-        print(res.text[:500])  # debug first 500 chars
+        print(f"❌ Failed to get sections: {res.status_code}")
         return None
-    
-    try:
-        data = res.json()
-        page_data = next(iter(data["query"]["pages"].values()))
-        return page_data["revisions"][0]["slots"]["main"]["*"]
-    except Exception as e:
-        print(f"❌ Failed to parse Wikipedia JSON: {e}")
+    data = res.json()
+    sections = data["parse"]["sections"]
+
+    # Find the "Matches" section
+    matches_section_index = None
+    for s in sections:
+        if "Matches" in s["line"]:
+            matches_section_index = s["index"]
+            break
+
+    if not matches_section_index:
+        print("❌ Could not find 'Matches' section.")
         return None
 
-# === PARSE RUGBYBOX FIXTURES ===
-def parse_rugbybox_fixtures(wikitext):
-    pattern = re.compile(
-        r"\{\{rugbybox.*?\n"
-        r"\| date\s*=\s*(.*?)\n"
-        r"\| time\s*=\s*(.*?)\n"
-        r"\| home\s*=\s*(.*?)\n.*?"
-        r"\| away\s*=\s*(.*?)\n.*?"
-        r"\| stadium\s*=\s*(.*?)\n",
-        re.DOTALL
-    )
-    matches = re.findall(pattern, wikitext)
+    # Step 2: Fetch HTML for that section
+    params_section = {
+        "action": "parse",
+        "page": page_title,
+        "prop": "text",
+        "section": matches_section_index,
+        "format": "json"
+    }
+    res2 = requests.get(URL, params=params_section, headers=headers)
+    if res2.status_code != 200:
+        print(f"❌ Failed to fetch section HTML: {res2.status_code}")
+        return None
+
+    section_html = res2.json()["parse"]["text"]["*"]
+    return section_html
+
+# === PARSE FIXTURES FROM RENDERED HTML ===
+def parse_fixtures_from_html(section_html):
+    soup = BeautifulSoup(section_html, "html.parser")
     fixtures = []
-    for m in matches:
-        date, time, home, away, stadium = m
+
+    # Rugbybox elements
+    for rb in soup.select("div.rugbybox"):
+        date = rb.find("div", class_="rb-date").get_text(strip=True) if rb.find("div", class_="rb-date") else ""
+        time = rb.find("div", class_="rb-time").get_text(strip=True) if rb.find("div", class_="rb-time") else ""
+        home = rb.find("div", class_="rb-home").get_text(strip=True) if rb.find("div", class_="rb-home") else ""
+        away = rb.find("div", class_="rb-away").get_text(strip=True) if rb.find("div", class_="rb-away") else ""
+        stadium = rb.find("div", class_="rb-stadium").get_text(strip=True) if rb.find("div", class_="rb-stadium") else ""
+
         fixtures.append({
-            "date": date.strip(),
-            "time": time.strip(),
-            "home": home.strip(),
-            "away": away.strip(),
-            "stadium": stadium.strip()
+            "date": date,
+            "time": time,
+            "home": home,
+            "away": away,
+            "stadium": stadium
         })
+
     return fixtures
 
 # === FIND NEXT FIXTURE ===
@@ -117,12 +135,12 @@ def main():
     print("🚀 Munster Bot Starting...")
 
     reddit = reddit_login()
-    wikitext = get_wikitext(SEASON_PAGE)
-    if not wikitext:
-        print("❌ Could not fetch Wikipedia wikitext.")
+    section_html = fetch_matches_section_html(SEASON_PAGE)
+    if not section_html:
+        print("❌ Could not fetch Matches section HTML.")
         return
 
-    fixtures = parse_rugbybox_fixtures(wikitext)
+    fixtures = parse_fixtures_from_html(section_html)
     if not fixtures:
         print("❌ No fixtures found.")
         return
