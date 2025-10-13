@@ -1,0 +1,4 @@
+requests
+mwparserfromhell
+beautifulsoup4
+python-dotenv
