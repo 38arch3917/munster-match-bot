@@ -1,167 +1,89 @@
-import os
-import praw
 import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
-import pytz
+import mwparserfromhell
+from dateutil import parser
+from datetime import datetime, timezone
 
-# === CONFIG ===
-SUBREDDIT = "MunsterRugby"
-TEAM_NAME = "Munster"
-POST_HOURS_BEFORE = 3
-USER_AGENT = "script:munster_match_bot:v11 (by u/MunsterKickoff)"
+# Wikipedia page for Munster Rugby season
 SEASON_PAGE = "2025-26_Munster_Rugby_season"
 
-# === REDDIT LOGIN ===
-def reddit_login():
-    reddit = praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        username=os.getenv("REDDIT_USERNAME"),
-        password=os.getenv("REDDIT_PASSWORD"),
-        user_agent=os.getenv("USER_AGENT", USER_AGENT)
-    )
-    print(f"✅ Logged in as: {reddit.user.me()}")
-    return reddit
-
-# === FETCH MATCHES SECTION HTML VIA WIKIPEDIA API ===
-def fetch_matches_section_html(page_title):
+def get_wikitext(title):
+    """
+    Fetches the wikitext of a Wikipedia page via MediaWiki API
+    """
+    S = requests.Session()
     URL = "https://en.wikipedia.org/w/api.php"
-    headers = {"User-Agent": USER_AGENT}
-
-    # Step 1: Get sections
-    params_sections = {
-        "action": "parse",
-        "page": page_title,
-        "prop": "sections",
-        "format": "json"
+    params = {
+        "action": "query",
+        "prop": "revisions",
+        "rvprop": "content",
+        "format": "json",
+        "titles": title
     }
-    res = requests.get(URL, params=params_sections, headers=headers)
-    if res.status_code != 200:
-        print(f"❌ Failed to get sections: {res.status_code}")
-        return None
+
+    res = S.get(url=URL, params=params)
+    res.raise_for_status()
     data = res.json()
-    sections = data["parse"]["sections"]
 
-    # Find the "Matches" section
-    matches_section_index = None
-    for s in sections:
-        if "Matches" in s["line"]:
-            matches_section_index = s["index"]
-            break
+    pages = data['query']['pages']
+    page = next(iter(pages.values()))
+    return page['revisions'][0]['*']
 
-    if not matches_section_index:
-        print("❌ Could not find 'Matches' section.")
-        return None
+def parse_rugbyboxes(wikitext):
+    """
+    Extract all rugbybox templates from wikitext and return a list of match dicts
+    """
+    wikicode = mwparserfromhell.parse(wikitext)
+    boxes = wikicode.filter_templates(matches=lambda t: t.name.strip().lower().startswith("rugbybox"))
+    
+    matches = []
+    for box in boxes:
+        match = {}
+        match['date'] = box.get('date').value.strip() if box.has('date') else None
+        match['time'] = box.get('time').value.strip() if box.has('time') else None
+        # home/away or team1/team2
+        match['home'] = box.get('home').value.strip() if box.has('home') else (box.get('team1').value.strip() if box.has('team1') else None)
+        match['away'] = box.get('away').value.strip() if box.has('away') else (box.get('team2').value.strip() if box.has('team2') else None)
+        match['stadium'] = box.get('stadium').value.strip() if box.has('stadium') else None
+        match['competition'] = None  # We'll assign later if needed
+        matches.append(match)
+    return matches
 
-    # Step 2: Fetch HTML for that section
-    params_section = {
-        "action": "parse",
-        "page": page_title,
-        "prop": "text",
-        "section": matches_section_index,
-        "format": "json"
-    }
-    res2 = requests.get(URL, params=params_section, headers=headers)
-    if res2.status_code != 200:
-        print(f"❌ Failed to fetch section HTML: {res2.status_code}")
-        return None
+def filter_future_matches(matches):
+    """
+    Filters matches to only those in the future
+    """
+    upcoming = []
+    now = datetime.now(timezone.utc)
+    for m in matches:
+        if m['date']:
+            try:
+                # Combine date and time if available
+                dt_str = m['date'] + (' ' + m['time'] if m['time'] else '')
+                dt = parser.parse(dt_str, dayfirst=True)
+                # Convert naive datetime to UTC if needed
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if dt > now:
+                    m['datetime'] = dt
+                    upcoming.append(m)
+            except Exception as e:
+                continue
+    return sorted(upcoming, key=lambda x: x['datetime'])
 
-    section_html = res2.json()["parse"]["text"]["*"]
-    return section_html
-
-# === PARSE FIXTURES FROM RENDERED HTML ===
-def parse_fixtures_from_html(section_html):
-    soup = BeautifulSoup(section_html, "html.parser")
-    fixtures = []
-
-    # Rugbybox elements
-    for rb in soup.select("div.rugbybox"):
-        date = rb.find("div", class_="rb-date").get_text(strip=True) if rb.find("div", class_="rb-date") else ""
-        time = rb.find("div", class_="rb-time").get_text(strip=True) if rb.find("div", class_="rb-time") else ""
-        home = rb.find("div", class_="rb-home").get_text(strip=True) if rb.find("div", class_="rb-home") else ""
-        away = rb.find("div", class_="rb-away").get_text(strip=True) if rb.find("div", class_="rb-away") else ""
-        stadium = rb.find("div", class_="rb-stadium").get_text(strip=True) if rb.find("div", class_="rb-stadium") else ""
-
-        fixtures.append({
-            "date": date,
-            "time": time,
-            "home": home,
-            "away": away,
-            "stadium": stadium
-        })
-
-    return fixtures
-
-# === FIND NEXT FIXTURE ===
-def get_next_fixture(fixtures):
-    now = datetime.utcnow().replace(tzinfo=pytz.UTC)
-    for fx in fixtures:
-        dt_str = f"{fx['date']} {fx['time']}"
-        try:
-            parsed = datetime.strptime(dt_str, "%d %B %Y %H:%M")
-            parsed = pytz.timezone("Europe/Dublin").localize(parsed).astimezone(pytz.UTC)
-            if parsed > now:
-                fx['kickoff_dt'] = parsed
-                return fx
-        except Exception:
-            continue
-    return None
-
-# === FORMAT POST BODY ===
-def format_post(fixture):
-    kickoff = fixture.get("time") or "TBC"
-    stadium = fixture.get("stadium") or "TBC"
-    body = f"""**FULL TIME:** _(to be updated after match)_ 🏉
-
----
-
-🏟️ **Venue:** {stadium}  
-⏰ **Kickoff:** {fixture['date']}, {kickoff}  
-🏆 **Competition:** United Rugby Championship  
-
----
-
-**Match:** {fixture['home']} vs {fixture['away']}
-
----
-
-*Automated by /u/MunsterKickoff 🤖*
-"""
-    return body
-
-# === MAIN ===
 def main():
     print("🚀 Munster Bot Starting...")
-
-    reddit = reddit_login()
-    section_html = fetch_matches_section_html(SEASON_PAGE)
-    if not section_html:
-        print("❌ Could not fetch Matches section HTML.")
+    wikitext = get_wikitext(SEASON_PAGE)
+    matches = parse_rugbyboxes(wikitext)
+    upcoming = filter_future_matches(matches)
+    
+    if not upcoming:
+        print("❌ No upcoming fixtures found.")
         return
 
-    fixtures = parse_fixtures_from_html(section_html)
-    if not fixtures:
-        print("❌ No fixtures found.")
-        return
-
-    print(f"Found {len(fixtures)} fixtures:")
-    for f in fixtures:
-        print(f)
-
-    next_fixture = get_next_fixture(fixtures)
-    if not next_fixture:
-        print("✅ No upcoming fixtures found.")
-        return
-
-    print(f"🏉 Next Fixture: {next_fixture}")
-
-    title = f"[Match Thread] {next_fixture['home']} vs {next_fixture['away']} ({datetime.utcnow().strftime('%a')})"
-    body = format_post(next_fixture)
-
-    subreddit = reddit.subreddit(SUBREDDIT)
-    subreddit.submit(title, selftext=body)
-    print("✅ Posted match thread successfully.")
+    print(f"✅ Found {len(upcoming)} upcoming fixtures:\n")
+    for m in upcoming:
+        date_str = m['datetime'].strftime("%d %b %Y %H:%M")
+        print(f"{date_str} | {m['home']} vs {m['away']} | Stadium: {m['stadium']}")
 
 if __name__ == "__main__":
     main()
