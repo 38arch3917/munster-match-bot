@@ -18,7 +18,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install praw requests beautifulsoup4 python-dateutil pytz
+        run: pip install -r requirements.txt
 
       - name: Run match thread bot
         env:
