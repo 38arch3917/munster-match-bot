@@ -1,101 +1,88 @@
-import os
-import time
 import praw
 import requests
+import time
+import os
 from urllib.parse import quote
 
-# Reddit API credentials (from GitHub secrets)
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
-REDDIT_USERNAME = os.getenv("REDDIT_USERNAME")
-REDDIT_PASSWORD = os.getenv("REDDIT_PASSWORD")
-USER_AGENT = os.getenv("USER_AGENT", "MunsterKickoffBot/1.0 by u/MunsterKickoff")
-
-# Subreddit & poster to monitor
-SUBREDDIT_NAME = "MunsterRugby"
-TARGET_USER = "MannyR1022"
-
-# Initialize Reddit instance
+# --- Reddit API Setup ---
 reddit = praw.Reddit(
-    client_id=REDDIT_CLIENT_ID,
-    client_secret=REDDIT_CLIENT_SECRET,
-    username=REDDIT_USERNAME,
-    password=REDDIT_PASSWORD,
-    user_agent=USER_AGENT,
+    client_id=os.getenv("REDDIT_CLIENT_ID"),
+    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+    username=os.getenv("REDDIT_USERNAME"),
+    password=os.getenv("REDDIT_PASSWORD"),
+    user_agent="MunsterRugbyArchiveBot by /u/MunsterKickoff"
 )
 
-def get_archive_link(url):
+SUBREDDIT = "MunsterRugby"
+POST_LIMIT = 10
+COMMENT_TAG = "🔥 Archived:"
+
+def archive_link(url):
     """
-    Submit the article to archive.ph and return the shortened link.
-    Handles 429 rate limits gracefully.
+    Attempts to get a short archive.ph link.
+    Falls back to full submit link if rate-limited or error occurs.
     """
     try:
-        submit_url = f"https://archive.ph/submit/?url={quote(url)}"
         print(f"📁 Archiving: {url}")
-        response = requests.get(submit_url, timeout=20)
+        response = requests.post("https://archive.ph/submit/", data={"url": url}, timeout=30)
         if response.status_code == 429:
             print("⚠️ Archive submission failed: 429 (Rate Limited)")
-            return None
+            raise Exception("Rate limited")
         elif response.status_code != 200:
-            print(f"⚠️ Unexpected response: {response.status_code}")
-            return None
+            print(f"⚠️ Archive submission failed: {response.status_code}")
+            raise Exception("Archive failed")
 
-        # Extract shortened archive link
+        # Extract archive link from response
         if "archive.ph/" in response.url:
-            return response.url
+            short_link = response.url
+            print(f"🔥 Archived: {short_link}")
+            return short_link
+        else:
+            raise Exception("Short link not found")
 
-        # Fallback — extract link manually from redirect or response text
-        for line in response.text.splitlines():
-            if "archive.ph" in line and "href" in line:
-                potential = line.split('"')[1]
-                if potential.startswith("https://archive.ph/") and len(potential) < 40:
-                    return potential
-        return None
     except Exception as e:
-        print(f"⚠️ Error getting archive link: {e}")
-        return None
+        # Fallback to full submit link
+        fallback_link = f"https://archive.ph/submit/?url={quote(url)}"
+        print(f"⚠️ Falling back to submit link: {fallback_link}")
+        return fallback_link
 
-def already_commented(submission):
-    """Check if bot already commented on this post."""
-    submission.comments.replace_more(limit=0)
-    for comment in submission.comments.list():
-        if comment.author and comment.author.name.lower() == REDDIT_USERNAME.lower():
-            return True
-    return False
 
 def process_new_posts():
-    """Check latest subreddit posts and comment if needed."""
-    print(f"🚀 *** Archive Bot started for r/{SUBREDDIT_NAME}")
-    print(f"✅ Logged in as: {REDDIT_USERNAME}")
-    print(f"👀 Monitoring subreddit: {SUBREDDIT_NAME}")
+    subreddit = reddit.subreddit(SUBREDDIT)
+    print(f"👀 Monitoring subreddit: {SUBREDDIT}")
 
-    subreddit = reddit.subreddit(SUBREDDIT_NAME)
+    for submission in subreddit.new(limit=POST_LIMIT):
+        if submission.author and submission.author.name.lower() == "munsterkickoff":
+            continue  # skip bot's own posts
 
-    for submission in subreddit.new(limit=10):
-        if submission.author and submission.author.name == TARGET_USER:
-            print(f"🧾 Found post by {TARGET_USER}: {submission.title}")
-
-            if already_commented(submission):
+        # Only process Irish Independent or relevant media posts
+        if "independent.ie" in submission.url or "irishexaminer.com" in submission.url:
+            print(f"🧾 Found post by {submission.author}: {submission.title}")
+            
+            # Check if already commented
+            submission.comments.replace_more(limit=0)
+            if any(COMMENT_TAG in comment.body for comment in submission.comments.list()):
                 print("⚙️ Already commented on this post. Skipping.")
                 continue
 
-            # Look for independent.ie links
-            if "independent.ie" in submission.url:
-                archive_link = get_archive_link(submission.url)
-                if archive_link:
-                    comment_text = (
-                        f"🔥 **Archived:** {archive_link}\n\n"
-                        f"*Automated by /u/MunsterKickoff 🤖*"
-                    )
-                    comment = submission.reply(comment_text)
-                    comment.mod.distinguish(sticky=True)
-                    print(f"✅ Commented and stickied on: {submission.title}")
-                else:
-                    print("⚠️ No archive link found. Skipping post.")
+            archive_url = archive_link(submission.url)
+            if archive_url:
+                comment_text = f"🔥 Archived: {archive_url}\n\n*Automated by /u/MunsterKickoff 🤖*"
+                try:
+                    submission.reply(comment_text)
+                    print(f"💬 Commented successfully on post: {submission.title}")
+                    time.sleep(30)
+                except Exception as e:
+                    print(f"⚠️ Failed to comment: {e}")
             else:
-                print("🔗 Post not from independent.ie, skipping.")
+                print("⚠️ No archive link found. Skipping post.")
         else:
             print("🕵️ No new target posts found or from another user.")
 
+
 if __name__ == "__main__":
-    process_new_posts()
+    print("🚀 *** Archive Bot started for r/MunsterRugby")
+    try:
+        process_new_posts()
+    except Exception as e:
+        print(f"❌ Error running bot: {e}")
