@@ -42,7 +42,7 @@ def scrape_kickoff_fixtures():
         opponent_a = time_h4.find_next('a')
         if not opponent_a:
             continue
-        opponent = opponent_a.text.strip().replace('v', 'Vs.')  # e.g., "Leinster Vs. Munster"
+        opponent = opponent_a.text.strip().replace('v', 'vs.')  # e.g., "Leinster vs. Munster"
         game_href = opponent_a['href']
         game_url = 'https://www.rugbykickoff.com' + game_href
         
@@ -116,7 +116,7 @@ def scrape_official_fixtures():
                 continue
             date_str = cols[0].text.strip()
             time_str = cols[1].text.strip()
-            opponent = cols[2].text.strip().replace(' v ', ' Vs. ')
+            opponent = cols[2].text.strip().replace(' v ', ' vs. ')
             venue = cols[3].text.strip()
             competition = cols[4].text.strip()
             broadcasters = cols[5].text.strip() if len(cols) > 5 else 'TBA'
@@ -177,7 +177,7 @@ def comp_short(competition):
 def build_title(opponent, dt_ist, comp_short, venue):
     date_fmt = dt_ist.strftime('%a %d %b %Y')
     time_fmt = dt_ist.strftime('%H:%M')
-    return f'🏉 Match Thread: {opponent} | {date_fmt} | {time_fmt} (IST) | {comp_short} | {venue}'
+    return f'🏉Match Thread: {opponent} | {date_fmt} | {time_fmt} (IST) | {comp_short} | {venue}'
 
 def build_body(dt_ist, venue, competition, broadcasters):
     date_fmt = dt_ist.strftime('%a %d %b %Y')
@@ -190,8 +190,12 @@ def build_body(dt_ist, venue, competition, broadcasters):
 
 📺 **Broadcasters:** {broadcasters}
 
-It’s all to play for! Drop your thoughts as the match unfolds! SUAF — COME ON MUNSTER! 🔥🔴🦌
+It’s all to play for! Drop your thoughts as the match unfolds — COME ON MUNSTER! 🔥🔴🦌
+
 ---
+
+**Stand Up and Fight! 💪🔴**
+
 *Automated by /u/MunsterKickoff 🤖*"""
 
 def post_exists(title):
