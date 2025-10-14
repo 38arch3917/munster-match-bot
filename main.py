@@ -38,7 +38,7 @@ def scrape_kickoff_fixtures():
         opponent_a = time_h4.find_next('a')
         if not opponent_a:
             continue
-        opponent = opponent_a.text.strip().replace('v', 'Vs.')  # e.g., "Leinster Vs. Munster"
+        opponent = opponent_a.text.strip().replace('v', 'vs.')  # e.g., "Leinster vs. Munster"
         game_href = opponent_a['href']
         game_url = 'https://www.rugbykickoff.com' + game_href
         
