@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 import praw
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
@@ -18,7 +18,10 @@ reddit = praw.Reddit(
 
 SUBREDDIT = 'MunsterRugby'
 
-def scrape_fixtures():
+def normalize(s):
+    return s.lower().replace(' v ', ' vs. ').replace('v', 'vs').replace('munster', '').replace(' ', '').strip()
+
+def scrape_kickoff_fixtures():
     url = 'https://www.rugbykickoff.com/Munster/'
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
@@ -56,45 +59,96 @@ def scrape_fixtures():
             'competition': competition,
             'venue': venue,
             'game_url': game_url,
-            'broadcasters': broadcasters
+            'broadcasters': broadcasters,
+            'time_zone': 'US/Eastern'
         })
-    return fixtures
+    return fixtures if fixtures else []
 
 def get_broadcasters(game_url):
-    response = requests.get(game_url)
+    try:
+        response = requests.get(game_url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        tv_section = soup.find('h3', string=lambda t: 'TV' in t if t else False)  # "Where's the match on TV?"
+        if not tv_section:
+            return 'TBA'
+        
+        ireland_h4 = tv_section.find_next('h4', string='Ireland:')
+        if not ireland_h4:
+            return 'TBA'
+        
+        broadcasters = []
+        a_tags = ireland_h4.find_next_siblings('a', limit=5)  # Up to 5 to avoid extras
+        for a in a_tags:
+            if a.text.strip():
+                broadcasters.append(a.text.strip())
+        
+        return ' & '.join(broadcasters) if broadcasters else 'TBA'
+    except:
+        return 'TBA'
+
+def scrape_official_fixtures():
+    url = 'https://www.munsterrugby.ie/munster-rugby-fixtures-results/'
+    response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
     
-    tv_section = soup.find('h3', string=lambda t: 'TV' in t if t else False)  # "Where's the match on TV?"
-    if not tv_section:
-        return 'TBA'
-    
-    ireland_h4 = tv_section.find_next('h4', string='Ireland:')
-    if not ireland_h4:
-        return 'TBA'
-    
-    broadcasters = []
-    a_tags = ireland_h4.find_next_siblings('a', limit=5)  # Up to 5 to avoid extras
-    for a in a_tags:
-        if a.text.strip():
-            broadcasters.append(a.text.strip())
-    
-    return ' & '.join(broadcasters) if broadcasters else 'TBA'
+    fixtures = []
+    now = datetime.now(pytz.timezone('Europe/Dublin'))
+    for row in soup.find_all('tr'):
+        cols = row.find_all('td')
+        if len(cols) < 5:
+            continue
+        date_str = cols[0].text.strip()
+        time_str = cols[1].text.strip()
+        opponent = cols[2].text.strip().replace(' v ', ' Vs. ')
+        venue = cols[3].text.strip()
+        competition = cols[4].text.strip()
+        broadcasters = cols[5].text.strip() if len(cols) > 5 else 'TBA'
+        
+        try:
+            dt_ist = parse_datetime_general({
+                'date_str': date_str,
+                'time_str': time_str,
+                'time_zone': 'Europe/Dublin'
+            })
+            if dt_ist > now:
+                fixtures.append({
+                    'date_str': date_str,
+                    'time_str': time_str,
+                    'opponent': opponent,
+                    'competition': competition,
+                    'venue': venue,
+                    'broadcasters': broadcasters,
+                    'game_url': None,
+                    'time_zone': 'Europe/Dublin'
+                })
+        except:
+            continue
+    return fixtures if fixtures else []
 
-def parse_datetime(date_str, time_str):
+def parse_datetime_general(fixture):
     now = datetime.now(pytz.utc)
-    parsed = parser.parse(f'{date_str} {time_str}')
-    dt = parsed.replace(year=now.year)
+    parsed = parser.parse(f'{fixture["date_str"]} {fixture["time_str"]}')
+    dt = parsed.replace(year=now.year if parsed.year == 1900 else parsed.year)  # dateutil defaults to 1900 if no year
     if dt < now:
         dt += relativedelta(years=1)
     
-    # Assume site time is US/Eastern
-    eastern = pytz.timezone('US/Eastern')
-    dt = eastern.localize(dt)
+    tz = pytz.timezone(fixture['time_zone'])
+    dt_local = tz.localize(dt)
     
-    # Convert to Europe/Dublin (Irish time)
     dublin = pytz.timezone('Europe/Dublin')
-    dt_ist = dt.astimezone(dublin)
+    dt_ist = dt_local.astimezone(dublin)
     return dt_ist
+
+def find_matching_official(kickoff_fixture, official_fixtures):
+    k_dt = parse_datetime_general(kickoff_fixture)
+    k_norm_opp = normalize(kickoff_fixture['opponent'])
+    for off in official_fixtures:
+        o_dt = parse_datetime_general(off)
+        o_norm_opp = normalize(off['opponent'])
+        if abs(k_dt - o_dt) < timedelta(hours=12) and k_norm_opp == o_norm_opp:
+            return off
+    return None
 
 def comp_short(competition):
     if 'United Rugby Championship' in competition:
@@ -120,7 +174,7 @@ def build_body(dt_ist, venue, competition, broadcasters):
 
 📺 **Broadcasters:** {broadcasters}
 
-It’s all to play for! Drop your thoughts as the match unfolds — COME ON MUNSTER, SUAF! 🔥🔴🦌
+It’s all to play for! Drop your thoughts as the match unfolds! SUAF — COME ON MUNSTER! 🔥🔴🦌
 ---
 *Automated by /u/MunsterKickoff 🤖*"""
 
@@ -131,10 +185,49 @@ def post_exists(title):
 
 def main():
     now = datetime.now(pytz.timezone('Europe/Dublin'))
-    fixtures = scrape_fixtures()
+    
+    kickoff_fixtures = []
+    official_fixtures = []
+    
+    try:
+        kickoff_fixtures = scrape_kickoff_fixtures()
+    except Exception as e:
+        print(f'Kickoff site error: {e}')
+    
+    try:
+        official_fixtures = scrape_official_fixtures()
+    except Exception as e:
+        print(f'Official site error: {e}')
+    
+    if not kickoff_fixtures and not official_fixtures:
+        print('No fixtures from either site.')
+        return
+    
+    if not kickoff_fixtures:
+        fixtures = official_fixtures
+    else:
+        fixtures = []
+        for k in kickoff_fixtures:
+            matching_off = find_matching_official(k, official_fixtures)
+            if matching_off:
+                # Cross-check and update with official data
+                if matching_off['venue'] and (k['venue'] == 'TBA' or k['venue'] != matching_off['venue']):
+                    k['venue'] = matching_off['venue']
+                if normalize(k['opponent']) != normalize(matching_off['opponent']):
+                    k['opponent'] = matching_off['opponent']
+                off_dt = parse_datetime_general(matching_off)
+                k_dt = parse_datetime_general(k)
+                if abs(off_dt - k_dt) >= timedelta(minutes=1):  # Allow minor diffs
+                    k['time_str'] = matching_off['time_str']
+                    k['date_str'] = matching_off['date_str']
+                    k['time_zone'] = matching_off['time_zone']
+                    print(f'Time mismatch for {k["opponent"]}, using official.')
+                if k['broadcasters'] == 'TBA' and matching_off['broadcasters'] != 'TBA':
+                    k['broadcasters'] = matching_off['broadcasters']
+            fixtures.append(k)
     
     for fixture in fixtures:
-        dt_ist = parse_datetime(fixture['date_str'], fixture['time_str'])
+        dt_ist = parse_datetime_general(fixture)
         if dt_ist <= now:
             continue  # Skip past matches
         
