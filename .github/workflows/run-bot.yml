@@ -1,51 +1,30 @@
-name: Run Archive Bot
+name: Archive Comment Bot
 
 on:
   schedule:
-    - cron: "*/10 * * * *"  # Runs every 10 minutes
-  workflow_dispatch:         # Allows manual run
+    - cron: "*/5 * * * *"  # every 5 minutes
+  workflow_dispatch:
 
 jobs:
-  run-archive-bot:
+  run-bot:
     runs-on: ubuntu-latest
-
     steps:
-      - name: 📦 Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: 🐍 Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: 🔧 Install Dependencies
+      - name: Install dependencies
         run: pip install praw requests
 
-      - name: 🚀 Run Archive Bot (First Attempt)
-        id: run1
-        continue-on-error: true
+      - name: Run archive comment bot
         env:
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
-        run: |
-          echo "Running Archive Bot - Attempt 1"
-          python comment_archives.py || echo "FIRST_RUN_FAILED" > run_status.txt
-
-      - name: ⏳ Wait before retry (if first run failed)
-        if: ${{ failure() || steps.run1.outcome == 'failure' }}
-        run: |
-          echo "Waiting 2 minutes before retry..."
-          sleep 120
-
-      - name: 🔁 Run Archive Bot (Retry if needed)
-        if: ${{ failure() || steps.run1.outcome == 'failure' }}
-        env:
-          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
-          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
-        run: |
-          echo "Running Archive Bot - Retry Attempt"
-          python comment_archives.py
+          USER_AGENT: ${{ secrets.USER_AGENT }}
+        run: python comment_archives.py
