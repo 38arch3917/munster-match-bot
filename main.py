@@ -6,6 +6,10 @@ import pytz
 from dateutil import parser
 from dateutil.relativedelta import relativedelta
 import os
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Reddit credentials from environment (GitHub secrets)
 reddit = praw.Reddit(
@@ -38,7 +42,7 @@ def scrape_kickoff_fixtures():
         opponent_a = time_h4.find_next('a')
         if not opponent_a:
             continue
-        opponent = opponent_a.text.strip().replace('v', 'vs.')  # e.g., "Leinster vs. Munster"
+        opponent = opponent_a.text.strip().replace('v', 'Vs.')  # e.g., "Leinster Vs. Munster"
         game_href = opponent_a['href']
         game_url = 'https://www.rugbykickoff.com' + game_href
         
@@ -89,41 +93,53 @@ def get_broadcasters(game_url):
 
 def scrape_official_fixtures():
     url = 'https://www.munsterrugby.ie/munster-rugby-fixtures-results/'
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.get(url)
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    driver.quit()
     
     fixtures = []
     now = datetime.now(pytz.timezone('Europe/Dublin'))
-    for row in soup.find_all('tr'):
-        cols = row.find_all('td')
-        if len(cols) < 5:
-            continue
-        date_str = cols[0].text.strip()
-        time_str = cols[1].text.strip()
-        opponent = cols[2].text.strip().replace(' v ', ' Vs. ')
-        venue = cols[3].text.strip()
-        competition = cols[4].text.strip()
-        broadcasters = cols[5].text.strip() if len(cols) > 5 else 'TBA'
-        
-        try:
-            dt_ist = parse_datetime_general({
-                'date_str': date_str,
-                'time_str': time_str,
-                'time_zone': 'Europe/Dublin'
-            })
-            if dt_ist > now:
-                fixtures.append({
+    # Assume table structure; adjust selectors if needed (e.g., if div-based, use soup.find_all('div', class_='fixture-row'))
+    table = soup.find('table', class_='fixtures-table')  # Add class if present; check page source
+    if not table:
+        table = soup.find('table')  # Fallback to first table
+    if table:
+        for row in table.find_all('tr'):
+            cols = row.find_all('td')
+            if len(cols) < 5:
+                continue
+            date_str = cols[0].text.strip()
+            time_str = cols[1].text.strip()
+            opponent = cols[2].text.strip().replace(' v ', ' Vs. ')
+            venue = cols[3].text.strip()
+            competition = cols[4].text.strip()
+            broadcasters = cols[5].text.strip() if len(cols) > 5 else 'TBA'
+            
+            try:
+                dt_ist = parse_datetime_general({
                     'date_str': date_str,
                     'time_str': time_str,
-                    'opponent': opponent,
-                    'competition': competition,
-                    'venue': venue,
-                    'broadcasters': broadcasters,
-                    'game_url': None,
                     'time_zone': 'Europe/Dublin'
                 })
-        except:
-            continue
+                if dt_ist > now:
+                    fixtures.append({
+                        'date_str': date_str,
+                        'time_str': time_str,
+                        'opponent': opponent,
+                        'competition': competition,
+                        'venue': venue,
+                        'broadcasters': broadcasters,
+                        'game_url': None,
+                        'time_zone': 'Europe/Dublin'
+                    })
+            except:
+                continue
     return fixtures if fixtures else []
 
 def parse_datetime_general(fixture):
