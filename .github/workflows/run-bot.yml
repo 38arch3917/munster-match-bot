@@ -2,7 +2,7 @@ name: Archive Comment Bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # every 5 minutes
+    - cron: "*/10 * * * *"  # every 10 minutes (safer polling interval)
   workflow_dispatch:
 
 jobs:
@@ -27,4 +27,8 @@ jobs:
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
+          SUBREDDIT_NAME: ${{ secrets.SUBREDDIT_NAME }}  # Optional: Add if parameterizing
+          TARGET_USER: ${{ secrets.TARGET_USER }}        # Optional: Add if parameterizing
+          TARGET_DOMAIN: ${{ secrets.TARGET_DOMAIN }}    # Optional: Add if parameterizing
+          RUN_ONCE: true                                 # Ensures single pass per run
         run: python comment_archives.py
