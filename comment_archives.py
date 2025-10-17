@@ -99,7 +99,6 @@ def process_new_posts():
                 f"🔥🔗 [Archive link for this article]({archive_link})\n"
                 f"---\n"
                 f"_Automated by /u/MunsterKickoff 🤖_\n\n"
-                f"<!--archivebot-->"
             )
 
             submission.reply(comment_text)
