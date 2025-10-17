@@ -98,7 +98,7 @@ def process_new_posts():
             comment_text = (
                 f"🔥🔗 [Archive link for this article]({archive_link})\n"
                 f"---\n"
-                f"_Automated by /u/MunsterKickoff 🤖_\n\n"
+                f"_Automated by /u/MunsterKickoff_\n"
             )
 
             submission.reply(comment_text)
