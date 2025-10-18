@@ -251,7 +251,7 @@ def main():
         if dt_ist <= now:
             continue  # Skip past matches
         
-        post_time = dt_ist - relativedelta(hours=1)  # Post 1 hour before
+        post_time = dt_ist - relativedelta(hours=2)  # Post 2 hour before
         if post_time <= now < dt_ist:
             title = build_title(fixture['opponent'], dt_ist, comp_short(fixture['competition']), fixture['venue'])
             if not post_exists(title):
