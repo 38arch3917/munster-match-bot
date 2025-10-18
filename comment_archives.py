@@ -3,28 +3,27 @@ import requests
 import time
 import os
 import logging
-from praw.exceptions import APIException
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Reddit client
+# 🚀 Initialize Reddit client
 reddit = praw.Reddit(
     client_id=os.getenv("REDDIT_CLIENT_ID"),
     client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
     username=os.getenv("REDDIT_USERNAME"),
     password=os.getenv("REDDIT_PASSWORD"),
-    user_agent=os.getenv("USER_AGENT", "Munster Archive Bot v2.2"),
+    user_agent=os.getenv("USER_AGENT", "Munster Archive Bot v2.0"),
 )
 
-# Config
-SUBREDDIT_NAME = os.getenv("SUBREDDIT_NAME", "MunsterRugby")
-LAST_PROCESSED_FILE = "/tmp/last_processed.txt"
+# 🔧 Configuration
+SUBREDDIT_NAME = os.getenv("SUBREDDIT_NAME") or "MunsterRugby"
 TARGET_DOMAINS = ["independent.ie", "m.independent.ie"]
+LAST_PROCESSED_FILE = "/tmp/last_processed.txt"
 
 def get_last_processed_id():
-    """Retrieve last processed post ID."""
+    """Retrieve the last processed submission ID to avoid repeats."""
     try:
         with open(LAST_PROCESSED_FILE, "r") as f:
             return f.read().strip()
@@ -32,23 +31,21 @@ def get_last_processed_id():
         return None
 
 def set_last_processed_id(submission_id):
-    """Save last processed post ID."""
+    """Store the latest processed submission ID."""
     with open(LAST_PROCESSED_FILE, "w") as f:
         f.write(submission_id)
 
 def already_commented(submission):
-    """Check if bot already commented on this post."""
+    """Check if the bot already commented on this post."""
     submission.comments.replace_more(limit=None)
     for comment in submission.comments.list():
-        if not comment.author:
-            continue
         body = (comment.body or "").lower()
         if str(comment.author).lower() == reddit.user.me().name.lower() or "<!--archivebot-->" in body:
             return True
     return False
 
 def submit_archive(url):
-    """Submit article to archive.ph and return the final archived link."""
+    """Submit a URL to archive.ph and return the archived or fallback link."""
     submit_url = f"https://archive.ph/submit/?url={url}"
     try:
         response = requests.get(submit_url, timeout=20, allow_redirects=True)
@@ -62,7 +59,7 @@ def submit_archive(url):
     return None
 
 def process_new_posts():
-    """Monitor subreddit and comment on new Independent.ie articles."""
+    """Main bot loop — monitors subreddit and comments archive links."""
     logger.info(f"🚀 *** Archive Bot started for r/{SUBREDDIT_NAME}")
     logger.info(f"✅ Logged in as: {reddit.user.me().name}")
     logger.info(f"👀 Monitoring subreddit: {SUBREDDIT_NAME}")
@@ -73,62 +70,57 @@ def process_new_posts():
     while True:
         try:
             for submission in subreddit.new(limit=25):
-                # Stop once we reach the last processed post
                 if last_processed and submission.id == last_processed:
                     logger.info("🛑 Reached last processed post. Exiting.")
                     set_last_processed_id(last_processed)
                     return
 
-                # Skip if already processed
+                # Only process independent.ie links
+                if not submission.url or not any(domain in submission.url for domain in TARGET_DOMAINS):
+                    continue
+
+                logger.info(f"🧾 Found target post: {submission.title} ({submission.url})")
+
                 if already_commented(submission):
                     logger.info("⚙️ Already commented on this post. Skipping.")
                     continue
 
-                # Check for valid domain
-                if not submission.url or not any(domain in submission.url for domain in TARGET_DOMAINS):
-                    continue
-
-                logger.info(f"🧾 Found article: {submission.title}")
+                # Try to archive the article
                 logger.info(f"📁 Archiving: {submission.url}")
-
                 archive_link = submit_archive(submission.url)
 
-                # Fallback link if archive fails or rate-limited
+                # If the short version fails, fallback to full submit URL
                 if not archive_link:
                     archive_link = f"https://archive.ph/submit/?url={submission.url}"
                     logger.warning("⚠️ Using fallback archive.ph submit link.")
 
-                # Comment body
+                # Build comment text
                 comment_text = (
                     f"🔥🔗 [Archive link for this article]({archive_link})\n"
                     f"---\n"
                     f"_This comment has been automated_\n"
                 )
 
-                # Post comment
+                # Post the comment
                 comment = submission.reply(comment_text)
-                logger.info(f"✅ Commented on: {submission.title}")
+                logger.info(f"✅ Commented on post: {submission.title}")
 
-                # Try to sticky & distinguish the comment
+                # Try to distinguish and sticky if mod privileges exist
                 try:
                     comment.mod.distinguish(sticky=True)
-                    logger.info("📌 Comment distinguished and stickied successfully.")
-                except APIException as e:
-                    logger.warning(f"⚠️ Failed to sticky comment: {e}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Unexpected error when stickying: {e}")
+                    logger.info("📌 Comment distinguished and stickied.")
+                except Exception:
+                    logger.info("ℹ️ No mod permissions to sticky comment.")
 
-                # Save last processed post ID
+                # Record last processed post
                 last_processed = submission.id
-                set_last_processed_id(last_processed)
-
-                time.sleep(20)  # Reddit rate limit buffer
+                time.sleep(20)  # Cooldown to avoid Reddit rate limits
 
             logger.info("🕵️ No new target posts found.")
             if os.getenv("RUN_ONCE"):
                 set_last_processed_id(last_processed or "")
                 break
-            time.sleep(120)  # Wait before next scan
+            time.sleep(120)
 
         except Exception as e:
             logger.error(f"⚠️ Error in main loop: {e}")
