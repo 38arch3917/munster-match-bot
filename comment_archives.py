@@ -98,7 +98,6 @@ def process_new_posts():
                 comment_text = (
                     f"🔥🔗 [Archive link for this article]({archive_link})\n"
                     f"---\n"
-                    f"_This comment has been automated_\n"
                 )
 
                 # Post the comment
