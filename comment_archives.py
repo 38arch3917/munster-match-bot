@@ -19,7 +19,7 @@ reddit = praw.Reddit(
 
 # 🔧 Configuration
 SUBREDDIT_NAME = os.getenv("SUBREDDIT_NAME") or "MunsterRugby"
-TARGET_DOMAINS = ["independent.ie", "m.independent.ie"]
+TARGET_DOMAINS = ["independent.ie", "m.independent.ie", "the42.ie", "irishtimes.com", "m.irishtimes.com"]
 LAST_PROCESSED_FILE = "/tmp/last_processed.txt"
 
 def get_last_processed_id():
