@@ -44,55 +44,38 @@ def scrape_kickoff_fixtures():
         logging.info(f"Kickoff soup title: {soup.title.string if soup.title else 'No title'}")
         
         fixtures = []
-        fixture_blocks = soup.find_all('div', class_='fixture-block')  # Target container
-        if not fixture_blocks:
-            fixture_blocks = soup.find_all('div', lambda tag: tag.name == 'div' and any('fixture' in c.lower() for c in tag.get('class', [])))  # Fallback
-        logging.info(f"Found {len(fixture_blocks)} fixture blocks")
-        for block in fixture_blocks:
-            date_h2 = block.find('h2')
-            if not date_h2:
-                continue
+        date_headers = soup.find_all('h2')  # Date headers
+        logging.info(f"Found {len(date_headers)} date headers (h2)")
+        for date_h2 in date_headers:
             date_str = date_h2.text.strip()
-            
-            time_h3 = block.find('h3')
-            if not time_h3:
-                logging.debug(f"No time h3 in block for {date_str}")
-                continue
-            time_str = time_h3.text.strip()
-            
-            opponent_p = block.find('p', recursive=False)  # First p sibling
-            if not opponent_p:
-                logging.debug(f"No opponent p in block for {date_str}")
-                continue
-            opponent_a = opponent_p.find('a')
-            if not opponent_a:
-                logging.debug(f"No opponent a in p for {date_str}")
-                continue
-            opponent = opponent_a.text.strip().replace('v', 'vs.')
-            game_href = opponent_a['href']
-            game_url = 'https://www.rugbykickoff.com' + game_href if game_href.startswith('/') else game_href
-            
-            comp_venue_p = opponent_p.find_next_sibling('p')  # Next sibling p
-            if not comp_venue_p:
-                logging.debug(f"No comp/venue p for {opponent}")
-                continue
-            comp_venue = comp_venue_p.text.strip().split(' - ')
-            competition = comp_venue[0] if len(comp_venue) > 0 else 'Unknown'
-            venue = comp_venue[1] if len(comp_venue) > 1 else 'TBA'
-            
-            broadcasters = get_broadcasters(game_url)
-            
-            fixtures.append({
-                'date_str': date_str,
-                'time_str': time_str,
-                'opponent': opponent,
-                'competition': competition,
-                'venue': venue,
-                'game_url': game_url,
-                'broadcasters': broadcasters,
-                'time_zone': 'US/Eastern'
-            })
-            logging.debug(f"Scraped: {opponent} on {date_str} at {time_str}, venue: {venue}")
+            current = date_h2.next_sibling
+            while current:
+                if current.name == 'h3':
+                    time_str = current.text.strip()
+                elif current.name == 'a':
+                    opponent = current.text.strip().replace('v', 'vs.')
+                    game_href = current['href']
+                    game_url = 'https://www.rugbykickoff.com' + game_href if game_href.startswith('/') else game_href
+                elif current.name == 'p':
+                    if ' - ' in current.text:
+                        comp_venue = current.text.strip().split(' - ')
+                        competition = comp_venue[0] if len(comp_venue) > 0 else 'Unknown'
+                        venue = comp_venue[1] if len(comp_venue) > 1 else 'TBA'
+                        broadcasters = get_broadcasters(game_url)
+                        fixtures.append({
+                            'date_str': date_str,
+                            'time_str': time_str,
+                            'opponent': opponent,
+                            'competition': competition,
+                            'venue': venue,
+                            'game_url': game_url,
+                            'broadcasters': broadcasters,
+                            'time_zone': 'US/Eastern'
+                        })
+                        logging.debug(f"Scraped: {opponent} on {date_str} at {time_str}, venue: {venue}")
+                current = current.next_sibling
+                if current and current.name == 'h2':  # Stop at next date
+                    break
         logging.info(f"✓ Scraped {len(fixtures)} kickoff fixtures")
         return fixtures
     except Exception as e:
@@ -109,7 +92,7 @@ def get_broadcasters(game_url):
         if not tv_section:
             return 'TBA'
         
-        ireland_h4 = tv_section.find_next_sibling('h4', string='Ireland:')
+        ireland_h4 = tv_section.find_next('h4', string='Ireland:')
         if not ireland_h4:
             return 'TBA'
         
@@ -134,19 +117,19 @@ def scrape_official_fixtures():
     driver = webdriver.Chrome(service=service, options=options)
     try:
         driver.get(url)
-        driver.implicitly_wait(15)  # Increased wait for JS
+        driver.implicitly_wait(15)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         logging.info(f"Official soup title: {soup.title.string if soup.title else 'No title'}")
         
         fixtures = []
         now = datetime.now(pytz.timezone('Europe/Dublin'))
         
-        # Try tables with more classes
-        table = soup.find('table', {'class': lambda x: x and any(term in x.lower() for term in ['fixture', 'match', 'result'])}) or soup.find('table')
+        # Try table
+        table = soup.find('table')
         if table:
             logging.info("Found table structure")
-            for row in table.find_all('tr')[1:]:  # Skip header
-                cols = row.find_all(['td', 'th'])
+            for row in table.find_all('tr')[1:]:
+                cols = row.find_all('td')
                 if len(cols) < 4:
                     continue
                 date_str = cols[0].text.strip()
@@ -177,53 +160,45 @@ def scrape_official_fixtures():
                     logging.warning(f"Parse error for row {date_str}: {parse_e}")
                     continue
         else:
+            # Div fallback with broader search
             logging.info("No table, trying fixture divs")
-            # Expanded classes
-            fixture_divs = soup.find_all('div', class_=lambda x: x and any(term in x.lower() for term in ['fixture-card', 'match-preview', 'event-item', 'result-item', 'fixture-item', 'match-card', 'game-row']))
-            if not fixture_divs:
-                # Text-based filter for upcoming matches
-                all_divs = soup.find_all('div')
-                fixture_divs = [d for d in all_divs if any(term in d.text.lower() for term in ['oct 25', 'nov 1', 'connacht', 'argentina', 'thomond', 'urc', 'champions cup'])][:20]
+            fixture_divs = soup.find_all('div', class_=lambda x: x and any(term in x.lower() for term in ['fixture', 'match', 'event', 'result', 'game', 'card']))
             logging.info(f"Found {len(fixture_divs)} targeted fixture divs")
-            for i, div in enumerate(fixture_divs[:10]):  # Limit
-                if i == 0:
-                    logging.info(f"Sample fixture div text: {div.text.strip()[:500]}...")  # Log first for debug
-                # Try to extract
-                date_elem = div.find(['span', 'div', 'p'], class_=lambda x: x and 'date' in x.lower() if x else False) or div.find(string=lambda t: t and any(month in t.lower() for month in ['oct', 'nov', 'dec']))
-                if not date_elem:
-                    continue
-                date_str = date_elem.strip() if isinstance(date_elem, str) else date_elem.text.strip()
-                time_elem = div.find(['span', 'div', 'p'], class_=lambda x: x and 'time' in x.lower() if x else False)
-                time_str = time_elem.text.strip() if time_elem else 'TBA'
-                opponent_elem = div.find('a') or div.find(string=lambda t: t and any(opp in t.lower() for opp in ['connacht', 'argentina', 'leinster']))
-                opponent = opponent_elem.strip().replace(' v ', ' vs. ') if isinstance(opponent_elem, str) else opponent_elem.text.strip().replace(' v ', ' vs. ') if opponent_elem else 'Unknown'
-                venue_elem = div.find(['span', 'div', 'p'], class_=lambda x: x and 'venue' in x.lower() if x else False) or div.find(string=lambda t: t and 'thomond' in t.lower())
-                venue = venue_elem.strip() if isinstance(venue_elem, str) else venue_elem.text.strip() if venue_elem else 'TBA'
-                comp_elem = div.find(['span', 'div', 'p'], class_=lambda x: x and ('comp' in x.lower() or 'urc' in x.lower() or 'champions' in x.lower()) if x else False)
-                competition = comp_elem.strip() if isinstance(comp_elem, str) else comp_elem.text.strip() if comp_elem else 'Unknown'
-                broadcasters = 'TBA'
-                
-                try:
-                    dt_ist = parse_datetime_general({
-                        'date_str': date_str,
-                        'time_str': time_str,
-                        'time_zone': 'Europe/Dublin'
-                    })
-                    if dt_ist > now:
-                        fixtures.append({
+            for div in fixture_divs:
+                text = div.text.strip()
+                if '2025' in text or '2026' in text:  # Filter for future
+                    logging.info(f"Sample fixture div text: {text[:500]}...")
+                    # Split text (e.g., "Sat 25 Oct 19:45 Connacht Thomond Park URC")
+                    parts = text.split()
+                    if len(parts) < 5:
+                        continue
+                    date_str = ' '.join(parts[:3])  # e.g., Sat 25 Oct
+                    time_str = parts[3]
+                    opponent = ' '.join(parts[4:6]).replace('v', 'vs.')  # e.g., vs. Connacht
+                    venue = ' '.join(parts[6:8])  # e.g., Thomond Park
+                    competition = ' '.join(parts[8:])  # e.g., URC
+                    broadcasters = 'TBA'
+                    
+                    try:
+                        dt_ist = parse_datetime_general({
                             'date_str': date_str,
                             'time_str': time_str,
-                            'opponent': opponent,
-                            'competition': competition,
-                            'venue': venue,
-                            'broadcasters': broadcasters,
-                            'game_url': None,
                             'time_zone': 'Europe/Dublin'
                         })
-                        logging.debug(f"Scraped div fixture: {opponent} on {date_str}")
-                except Exception as parse_e:
-                    logging.warning(f"Div parse error for {date_str}: {parse_e}")
-                    continue
+                        if dt_ist > now:
+                            fixtures.append({
+                                'date_str': date_str,
+                                'time_str': time_str,
+                                'opponent': opponent,
+                                'competition': competition,
+                                'venue': venue,
+                                'broadcasters': broadcasters,
+                                'game_url': None,
+                                'time_zone': 'Europe/Dublin'
+                            })
+                    except Exception as parse_e:
+                        logging.warning(f"Div parse error for {date_str}: {parse_e}")
+                        continue
         
         logging.info(f"✓ Scraped {len(fixtures)} official fixtures")
         return fixtures
