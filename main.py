@@ -44,24 +44,31 @@ def scrape_kickoff_fixtures():
         logging.info(f"Kickoff soup title: {soup.title.string if soup.title else 'No title'}")
         
         fixtures = []
-        date_headers = soup.find_all('h3')
-        logging.info(f"Found {len(date_headers)} date headers (h3)")
-        for date_h3 in date_headers:
-            date_str = date_h3.text.strip()
-            time_h4 = date_h3.find_next('h4')
-            if not time_h4:
+        date_headers = soup.find_all('h2')  # Updated: Dates are h2 now
+        logging.info(f"Found {len(date_headers)} date headers (h2)")
+        for date_h2 in date_headers:
+            date_str = date_h2.text.strip()
+            time_h3 = date_h2.find_next('h3')  # Time is next h3
+            if not time_h3:
+                logging.debug(f"No time h3 after date {date_str}")
                 continue
-            time_str = time_h4.text.strip()
+            time_str = time_h3.text.strip()
             
-            opponent_a = time_h4.find_next('a')
+            opponent_p = time_h3.find_next('p')  # Opponent in next p > a
+            if not opponent_p:
+                logging.debug(f"No opponent p after time {time_str}")
+                continue
+            opponent_a = opponent_p.find('a')
             if not opponent_a:
+                logging.debug(f"No opponent a in p after {time_str}")
                 continue
             opponent = opponent_a.text.strip().replace('v', 'vs.')
             game_href = opponent_a['href']
             game_url = 'https://www.rugbykickoff.com' + game_href
             
-            comp_venue_p = opponent_a.find_next('p')
+            comp_venue_p = opponent_p.find_next('p')  # Next p for comp - venue
             if not comp_venue_p:
+                logging.debug(f"No comp/venue p after opponent {opponent}")
                 continue
             comp_venue = comp_venue_p.text.strip().split(' - ')
             competition = comp_venue[0] if len(comp_venue) > 0 else 'Unknown'
@@ -79,6 +86,7 @@ def scrape_kickoff_fixtures():
                 'broadcasters': broadcasters,
                 'time_zone': 'US/Eastern'
             })
+            logging.debug(f"Scraped: {opponent} on {date_str} at {time_str}")
         logging.info(f"✓ Scraped {len(fixtures)} kickoff fixtures")
         return fixtures
     except Exception as e:
@@ -127,21 +135,19 @@ def scrape_official_fixtures():
         fixtures = []
         now = datetime.now(pytz.timezone('Europe/Dublin'))
         
-        # Try table first
-        table = soup.find('table', class_='fixtures-table')
-        if not table:
-            table = soup.find('table')
+        # Try common table classes
+        table = soup.find('table', {'class': lambda x: x and 'fixture' in x.lower()}) or soup.find('table', class_='results') or soup.find('table')
         if table:
             logging.info("Found table structure")
-            for row in table.find_all('tr'):
-                cols = row.find_all('td')
-                if len(cols) < 5:
+            for row in table.find_all('tr')[1:]:  # Skip header
+                cols = row.find_all(['td', 'th'])
+                if len(cols) < 4:
                     continue
                 date_str = cols[0].text.strip()
                 time_str = cols[1].text.strip()
                 opponent = cols[2].text.strip().replace(' v ', ' vs. ')
                 venue = cols[3].text.strip()
-                competition = cols[4].text.strip()
+                competition = cols[4].text.strip() if len(cols) > 4 else 'Unknown'
                 broadcasters = cols[5].text.strip() if len(cols) > 5 else 'TBA'
                 
                 try:
@@ -165,19 +171,51 @@ def scrape_official_fixtures():
                     logging.warning(f"Parse error for row {date_str}: {parse_e}")
                     continue
         else:
-            # Fallback to div-based (common for dynamic sites)
-            logging.info("No table found, trying div fixtures")
-            fixture_divs = soup.find_all('div', class_=lambda x: x and ('fixture' in x.lower() or 'match' in x.lower()))
-            logging.info(f"Found {len(fixture_divs)} potential fixture divs")
-            for div in fixture_divs[:10]:  # Limit to first 10
-                # Assume structure: date/time in spans, opponent/venue in others—adjust based on inspect
-                date_elem = div.find('span', string=lambda t: t and any(d in t.lower() for d in ['oct', 'nov']))
+            # Fallback to div-based: Target common fixture card classes
+            logging.info("No table, trying fixture divs")
+            fixture_divs = soup.find_all('div', class_=lambda x: x and any(term in x.lower() for term in ['fixture-card', 'match-preview', 'event-item', 'result-item']))
+            if not fixture_divs:
+                # Broader but filtered by text (e.g., dates/opponents)
+                all_divs = soup.find_all('div')
+                fixture_divs = [d for d in all_divs if any(term in d.text.lower() for term in ['oct 25', 'connacht', 'thomond', 'urc'])][:10]  # For testing/current match
+            logging.info(f"Found {len(fixture_divs)} targeted fixture divs")
+            for div in fixture_divs:
+                # Extract from common sub-elements (adjust classes based on inspect)
+                date_elem = div.find(['span', 'div'], class_=lambda x: x and 'date' in x.lower()) or div.find(text=lambda t: t and any(month in t.lower() for month in ['oct', 'nov']))
                 if not date_elem:
                     continue
-                # Placeholder parsing—customize after inspect
-                # Example: date_str = date_elem.text; time_str = div.find('span', class_='time').text, etc.
-                # For now, skip detailed; log for debug
-                logging.info(f"Sample div content: {div.text[:200]}")
+                date_str = date_elem.strip() if isinstance(date_elem, str) else date_elem.text.strip()
+                time_elem = div.find(['span', 'div'], class_=lambda x: x and 'time' in x.lower())
+                time_str = time_elem.text.strip() if time_elem else 'TBA'
+                opponent_elem = div.find('a', class_=lambda x: x and 'opponent' in x.lower()) or div.find(text=lambda t: t and 'connacht' in t.lower())
+                opponent = opponent_elem.text.strip().replace(' v ', ' vs. ') if opponent_elem else 'Unknown'
+                venue_elem = div.find(['span', 'div'], class_=lambda x: x and 'venue' in x.lower())
+                venue = venue_elem.text.strip() if venue_elem else 'TBA'
+                comp_elem = div.find(['span', 'div'], class_=lambda x: x and 'comp' in x.lower())
+                competition = comp_elem.text.strip() if comp_elem else 'Unknown'
+                broadcasters = 'TBA'  # Often not on list page
+                
+                try:
+                    dt_ist = parse_datetime_general({
+                        'date_str': date_str,
+                        'time_str': time_str,
+                        'time_zone': 'Europe/Dublin'
+                    })
+                    if dt_ist > now:
+                        fixtures.append({
+                            'date_str': date_str,
+                            'time_str': time_str,
+                            'opponent': opponent,
+                            'competition': competition,
+                            'venue': venue,
+                            'broadcasters': broadcasters,
+                            'game_url': None,
+                            'time_zone': 'Europe/Dublin'
+                        })
+                        logging.debug(f"Scraped div fixture: {opponent} on {date_str}")
+                except Exception as parse_e:
+                    logging.warning(f"Div parse error for {date_str}: {parse_e}")
+                    continue
         
         logging.info(f"✓ Scraped {len(fixtures)} official fixtures")
         return fixtures
@@ -252,7 +290,7 @@ def post_exists(title):
         return any(results)
     except Exception as e:
         logging.error(f'Reddit search error: {e}')
-        return False  # Assume not exists on error to avoid blocking posts
+        return False  # Assume not exists on error
 
 def main():
     now = datetime.now(pytz.timezone('Europe/Dublin'))
