@@ -107,14 +107,15 @@ def parse_datetime_general(fixture):
     now = datetime.now(pytz.utc)
     parsed = parser.parse(f'{fixture["date_str"]} {fixture["time_str"]}')
     dt = parsed.replace(year=now.year if parsed.year == 1900 else parsed.year)
+    
+    tz = pytz.timezone(fixture['time_zone'])
+    dt = tz.localize(dt)
+    
     if dt < now:
         dt += relativedelta(years=1)
     
-    tz = pytz.timezone(fixture['time_zone'])
-    dt_local = tz.localize(dt)
-    
     dublin = pytz.timezone('Europe/Dublin')
-    dt_ist = dt_local.astimezone(dublin)
+    dt_ist = dt.astimezone(dublin)
     return dt_ist
 
 def comp_short(competition):
@@ -142,7 +143,9 @@ def build_body(dt_ist, venue, competition, broadcasters):
 📺 **Broadcasters:** {broadcasters}
 
 It’s all to play for! Drop your thoughts as the match unfolds — COME ON MUNSTER, SUAF! 🔥💪🔴🦌
+
 ---
+
 *Automated by Munster Kickoff Bot*"""
 
 def post_exists(title):
