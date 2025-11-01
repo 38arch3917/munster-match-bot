@@ -129,16 +129,16 @@ def comp_short(competition):
 def build_title(opponent, dt_ist, comp_short, venue):
     date_fmt = dt_ist.strftime('%a %d %b %Y')
     time_fmt = dt_ist.strftime('%H:%M')
-    return f'🏉 Match Thread: {opponent} | {date_fmt} | {time_fmt} (IST) | {comp_short} | {venue}'
+    venue_part = f' | {venue}' if venue != 'TBA' else ''
+    return f'🏉 Match Thread: {opponent} | {date_fmt} | {time_fmt} (IST) | {comp_short}{venue_part}'
 
 def build_body(dt_ist, venue, competition, broadcasters):
     date_fmt = dt_ist.strftime('%a %d %b %Y')
     time_fmt = dt_ist.strftime('%H:%M')
+    venue_line = f'📍 **Venue:** {venue}\n\n' if venue != 'TBA' else ''
     return f"""🏉 **Kickoff:** {date_fmt} @ {time_fmt} (IST)
 
-📍 **Venue:** {venue}
-
-🏆 **Competition:** {competition}
+{venue_line}🏆 **Competition:** {competition}
 
 📺 **Broadcasters:** {broadcasters}
 
